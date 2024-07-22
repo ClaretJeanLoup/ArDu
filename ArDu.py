@@ -1,5 +1,5 @@
+# Loading required packages 
 import matplotlib
-matplotlib.use('Agg')  # Use Agg backend which does not require a display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -50,17 +50,18 @@ def calculate_mean_coverage_for_genes(regions, bam_file):
         for region in gene_coverage[name]: 
             sum_coverage += region[0]
             length += region[1]
-        mean_coverage = sum_coverage / length if length != 0 else 0
+        mean_coverage = sum_coverage / length if length != 0 else 'NA'
         gene_coverage[name] = mean_coverage
     return gene_coverage
 
+# Function to normalise the depth of coverage per regions
 def region_normalisation(gene_coverage, ref_coverage):
     norm_coverage = {}
     for name in gene_coverage.keys():
         if ref_coverage: 
             normalised_coverage = gene_coverage[name] / ref_coverage
         else:
-            normalised_coverage = 0
+            normalised_coverage = "NA"
         # Append normalised coverage to the list for the gene or create a new list
         norm_coverage[name] = normalised_coverage
     return norm_coverage
@@ -111,6 +112,7 @@ def get_regions(regions):
                 regions_dict[line[3]] = [f"{line[0]}:{line[1]}-{line[2]}"]
     return regions_dict
 
+# Function to compute the total span of a candidate gene
 def get_totalspan(regions, gene_name):
     # Initialize variables to store the gene's intervals
     gene_intervals = []
@@ -144,10 +146,9 @@ def get_totalspan(regions, gene_name):
     totalspan = (chrm, min_start, max_end)
     return totalspan
 
-
 # Main function
 def main():
-    # Main arguments
+    # Mandatory arguments
     parser = argparse.ArgumentParser(description="Identify duplication structure via depth of coverage data")
     parser.add_argument("-b", "--bam", help="Input a list of BAM files (one per line)")
     parser.add_argument("-r", "--region", required=True, help="Takes as input a 4 columns file (tab delimited, as bed format: 'chromosome\tstart\tstop\tname') containing regions of \
@@ -157,11 +158,12 @@ def main():
 
     #Optional arguments
     ## Plotting
-    parser.add_argument("--plot", type=str, default="png", help="Optional: produces a plot of the raw and normalised depth of coverage. Accepts as value the following extensions for the plot file: \
+    parser.add_argument("--plot", type=str, default="png",help="Optional: produces a plot of the raw and normalised depth of coverage. Accepts as value the following extensions for the plot file: \
                         png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, the putative breakpoints will be plotted.")
     parser.add_argument("--plot_treshold", type=float, default= 1.4, help="Treshold value to consider a duplication. Default value is 1.4, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a mono-copy and a duplicated copy of a given gene.")
     parser.add_argument("--plot_extension", type=int, default= 1000, help="A number of bases that will be added on either sides of the gene interval for plotting")
-    parser.add_argument("--plot_interval", type=str, help="A specific genomic interval for plotting, format chromosome:start-stop")
+    parser.add_argument("--plot_interval", type=str, help="A specific genomic interval used for plotting, format chromosome:start-stop")
+    parser.add_argument("--plot_proportion", type=float, default= 2, help="Set the plotting interval to X time the size of the total gene span. Default = 2.")
     parser.add_argument("--plot_slw", type=int, default= 1000, help="Sliding window size (pb) used for coverage representation, higher values will result in a smoother depth of coverage representation.")
     parser.add_argument("--plot_min_norm_depth", type=float, help="Minimum normalised depth of coverage to use for plotting.")
     parser.add_argument("--plot_max_norm_depth", type=float, help="Maximum normalised depth of coverage to use for plotting.")
@@ -179,6 +181,7 @@ def main():
                         use this option if you don't have a prior on the bkp number in the structure you're looking at. Default= 2.")
     parser.add_argument("--model", type=str, default="l2", help="Model used by ruptures package. Default ='l2'.")
     parser.add_argument("--threshold", type=float, default=1.0, help="Threshold for detecting shifts in depth of coverage.")
+
     ## Genotyping 
     parser.add_argument("--passes", type=int, default=1, help="Number of rolling average passes. Increasing will result in a lessening of the overal variation in depth of coverage.")
     parser.add_argument("--mutation", help="Optional: if set, this option will return the count of bases at the given position(s) in a .mutation.tsv file. Takes as input a file with \
@@ -219,52 +222,67 @@ def main():
 
             # Check the gene_coverage and processing depth data
             for gene, coverage in norm_gene_coverage.items():
-                if coverage > args.plot_treshold and (args.plot or args.breakpoint):
+                if coverage > args.plot_treshold:
+                    print(f"The {gene} locus in {bam_file} is duplicated.")
 
                     # Depth file creation to produce a plot
-                    print(f"The {gene} locus in {bam_file} is duplicated, generating a plot.")
-                    if args.plot_interval:
+                    if args.plot_interval and args.plot:
                         ch, pos_r = args.plot_interval.split(":")
                         plotStart, plotStop = map(int, pos_r.split("-"))
-                        str_incr_span = f"{ch}:{plotStart}-{plotStop}"
+                        totalspan = f"{ch}:{plotStart}-{plotStop}"
                         samfile = pysam.AlignmentFile(bam_file, "rb")
                         depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span)]
 
-
-                    elif args.plot_extension:
+                    elif args.plot_proportion and args.plot:
                         totalspan = get_totalspan(args.region, gene)
                         if totalspan is None:
                             print(f"Warning: No intervals found for gene {gene} in BED file.")
                             continue                    
                         chromosome, plotStart, plotStop = totalspan
-                        
                         # Adjust plotStart and plotStop according to args.plot_extension
-                        plotStart -= args.plot_extension
-                        plotStop += args.plot_extension
-                        
+                        gene_length = plotStop - plotStart
+                        # Calculate extension based on the proportion of total gene length 
+                        extension = gene_length * args.plot_proportion
+                        plotStart -= int(extension)
+                        plotStop += int(extension)
                         # Create depth file
                         str_incr_span = f"{chromosome}:{plotStart}-{plotStop}"
                         samfile = pysam.AlignmentFile(bam_file, "rb")
-                        depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span)]
+                        depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span)] 
+
+                    elif args.plot_extension and args.plot:
+                        totalspan = get_totalspan(args.region, gene)
+                        if totalspan is None:
+                            print(f"Warning: No intervals found for gene {gene} in BED file.")
+                            continue                    
+                        chromosome, plotStart, plotStop = totalspan
+                        # Adjust plotStart and plotStop according to args.plot_extension
+                        plotStart -= args.plot_extension
+                        plotStop += args.plot_extension
+                        # Create depth file
+                        str_incr_span = f"{chromosome}:{plotStart}-{plotStop}"
+                        samfile = pysam.AlignmentFile(bam_file, "rb")
+                        depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span)]                   
 
                     else:
-                        print("If --plot is set, either --plot_interval or --plot_extension should be provided.")
+                        print("If --plot is set, either --plot_interval, --plot_proportion or --plot_extension should be provided.")
                     
                     samfile.close()
                     d = pd.DataFrame(depth_data, columns=["pos", "depth"])  # Convert depth data into a DataFrame
                     
                     # Normalize depth data
                     d["norm"] = normalise_depth(d.depth, ref_coverage)
-                    
-                    # Remove under or over covered bases 
+
+                    # Smooth the normalised depth of coverage using numpy window average
+                    d["moving_average"] = window_average(d["norm"].to_numpy(), args.plot_slw)
+
+                    # Remove under- or over- covered bases 
                     if args.plot_min_norm_depth:
                         d = d[d["norm"] >= args.plot_min_norm_depth]
 
                     if args.plot_max_norm_depth:
                         d = d[d["norm"] <= args.plot_max_norm_depth]
-
-                    # Smooth the normalised depth of coverage using numpy window average
-                    d["moving_average"] = window_average(d["norm"].to_numpy(), args.plot_slw)
+                        
 
                     # Breakpoints identification
                     # Run ruptures on the normalised depth of coverage if --breakpoint is set to "ruptures"
@@ -308,7 +326,6 @@ def main():
                     # Plotting
                     plt.figure(figsize=(10, 6))
                     plt.plot(d.pos, d.norm, label="Normalised Depth of Coverage", color="lightsteelblue")
-                    plt.plot(d.pos, d.moving_average, label="Smoothed Depth of Coverage", color="black")
                     if args.breakpoint == "ruptures":
                         for i, b in enumerate(result[:-1]):
                             plt.axvline(d.loc[b]["pos"], color="red", linestyle="-", linewidth=0.6) 
@@ -328,17 +345,17 @@ def main():
                         plt.title("Depth of Coverage")
                     if args.plot_gene_pos:
                         totalspan = get_totalspan(args.region, gene)
-                        plt.axvline(totalspan[1], color="purple", linestyle="-", linewidth=0.6)
-                        plt.axvline(totalspan[2], color="purple", linestyle="-", linewidth=0.6)
+                        plt.axvline(totalspan[1], color="purple", linestyle="-", linewidth=0.8)
+                        plt.axvline(totalspan[2], color="purple", linestyle="-", linewidth=0.8)
+                    plt.plot(d.pos, d.moving_average, label="Smoothed Depth of Coverage", color="black")
                     plt.suptitle(f"{gene} locus in {bam_file}", fontsize=16)
-                    plt.xlabel(f"Genomic position on {str_incr_span} (bp)")
+                    plt.xlabel(f"Genomic position: {str_incr_span}")
                     plt.ylabel("Normalised Depth of Coverage")
                     plt.legend()
                     
                     # Save the plot file
                     plt.savefig(f"{bam_name}_{gene}_plot.{args.plot}")
                     plt.close()
-
 
         except Exception as e:
             print(f"Error computing normalised depth of coverage in {bam_file}: {e}")
