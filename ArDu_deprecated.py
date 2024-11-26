@@ -12,12 +12,7 @@ import os
 
 # Function to normalise depth of coverage
 def normalise_depth(depth_data, ref_cover):
-    if isinstance(depth_data, str) or isinstance(ref_cover, str):
-        return "NA"
-        print("Error during depth of coverage normalisation, either reference or target depth of coverage value is invalid.")
-    else:
-        return depth_data / ref_cover
-
+    return depth_data / ref_cover
 
 # Function for rolling average smoothing
 def window_average(arr: np.ndarray, w: int):
@@ -28,67 +23,48 @@ def window_average(arr: np.ndarray, w: int):
 
 # Function to calculate the sum coverage from a BAM file within a specified region
 def calculate_sum_coverage(bam_file, region):
-    try:
-        # Open BAM file
-        samfile = pysam.AlignmentFile(bam_file, "rb")
-        coverage_depths = []
-
-        # Calculate coverage depths for the region
-        for pileupcolumn in samfile.pileup(region=region, stepper="all"): #
-            coverage_depths.append(pileupcolumn.n)
-        samfile.close()
-
-        # Ensure there are coverage depths available
-        if coverage_depths:
-            sum_coverage = sum(coverage_depths)
-            region_length = len(coverage_depths)  
-            return sum_coverage, region_length
-        else:
-            # Return "NA" if no coverage data is available
-            return "NA", "NA"
-
-    except Exception as e:
-        print(f"Error calculating sum coverage for region {region}: {e}")
-        return "NA", "NA"  # Return NA for errors
+    samfile = pysam.AlignmentFile(bam_file, "rb")
+    coverage_depths = []
+    for pileupcolumn in samfile.pileup(region=region):
+        coverage_depths.append(pileupcolumn.n)
+    samfile.close()
+    if coverage_depths:
+        sum_coverage = sum(coverage_depths) 
+        length = len(coverage_depths)
+        return sum_coverage, length 
+        
+    else:
+        return 0, 0
 
 # Function to read BED file and calculate mean coverage for each gene
 def calculate_mean_coverage_for_genes(regions, bam_file):
     gene_coverage = {}
     for name in regions.keys():
         for region in regions[name]:
-            sum_coverage, length = calculate_sum_coverage(bam_file, region)
+            sum_coverage, length = calculate_mean_coverage(bam_file, region)
             if name in gene_coverage:
                 gene_coverage[name].append((sum_coverage,length))
             else:
                 gene_coverage[name] = [(sum_coverage,length)]
         sum_coverage = 0
         length = 0
-        for region in gene_coverage[name]:
-            if region[0] == 'NA' or region[1] == 'NA':
-                mean_coverage = 'NA'
-                break
+        for region in gene_coverage[name]: 
             sum_coverage += region[0]
             length += region[1]
-        else:
-            mean_coverage = sum_coverage / length if length != 0 else 'NA'
+        mean_coverage = sum_coverage / length if length != 0 else 'NA'
         gene_coverage[name] = mean_coverage
     return gene_coverage
-        
-# Function to normalise the depth of coverage per region
+
+# Function to normalise the depth of coverage per regions
 def region_normalisation(gene_coverage, ref_coverage):
     norm_coverage = {}
-    
     for name in gene_coverage.keys():
-        # Check the type of the value in ref_coverage corresponding to the key `name`
-        if isinstance(ref_coverage, float) and isinstance(gene_coverage[name], float): 
-            normalised_coverage = gene_coverage[name] / ref_coverage  
+        if ref_coverage: 
+            normalised_coverage = gene_coverage[name] / ref_coverage
         else:
-            normalised_coverage = "NA" 
-            print(f"Unexpected type for gene_coverage[{name}]: {type(gene_coverage[name])}")
-       
-        # Store the normalised coverage in the dictionary
+            normalised_coverage = "NA"
+        # Append normalised coverage to the list for the gene or create a new list
         norm_coverage[name] = normalised_coverage
-    
     return norm_coverage
 
 # Function to detect significant shifts between normalised depth and moving average
@@ -183,7 +159,7 @@ def main():
 
     #Optional arguments
     ## Plotting
-    parser.add_argument("--plot", type=str, default=None,help="Optional: produces a plot of the raw and normalised depth of coverage. Accepts as value the following extensions for the plot file: \
+    parser.add_argument("--plot", type=str, default="png",help="Optional: produces a plot of the raw and normalised depth of coverage. Accepts as value the following extensions for the plot file: \
                         png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, the putative breakpoints will be plotted.")
     parser.add_argument("--plot_treshold", type=float, default= 1.4, help="Treshold value to consider a duplication. Default value is 1.4, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a mono-copy and a duplicated copy of a given gene.")
     parser.add_argument("--plot_extension", type=int, default= 1000, help="A number of bases that will be added on either sides of the gene interval for plotting")
@@ -193,12 +169,10 @@ def main():
     parser.add_argument("--plot_min_norm_depth", type=float, help="Minimum normalised depth of coverage to use for plotting.")
     parser.add_argument("--plot_max_norm_depth", type=float, help="Maximum normalised depth of coverage to use for plotting.")
     parser.add_argument("--plot_gene_pos",action='store_true', help="When set, add vertical lines to indicate the duplicated gene position on the plot.")
-    parser.add_argument("--plot_force", action='store_true', help="Forces plotting regardless of depth of coverage value.")
-
 
     ## Breakpoints detection
-    parser.add_argument("--breakpoint", choices=["ruptures", "rollingaverage"], help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
-                        'ruptures' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --window-size, --pen and --model. \n\
+    parser.add_argument("--breakpoint", choices=["ruptures", "rollingaverage"], help="Optional: assess putative breakpoints. Two methods are available: 'rupture' and 'rollingaverage'. \n\
+                        'rupture' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --window-size, --pen and --model. \n\
                         'rollingaverage' uses successive rolling average to detect shifts in depth of coverage. Associated options are --window-size and --threshold and --passes. \n\
                         Setting this argument will create a '.breakpoints.tsv' output file containing the positions found by the rupture package, or the regions of depth of coverage \
                         shifting found with 'rollingaverage'.")
@@ -208,11 +182,11 @@ def main():
                         use this option if you don't have a prior on the bkp number in the structure you're looking at. Default= 2.")
     parser.add_argument("--model", type=str, default="l2", help="Model used by ruptures package. Default ='l2'.")
     parser.add_argument("--threshold", type=float, default=1.0, help="Threshold for detecting shifts in depth of coverage.")
-    parser.add_argument("--passes", type=int, default=1, help="Number of rolling average passes. Increasing will result in a lessening of the overal variation in depth of coverage.")
 
     ## Genotyping 
+    parser.add_argument("--passes", type=int, default=1, help="Number of rolling average passes. Increasing will result in a lessening of the overal variation in depth of coverage.")
     parser.add_argument("--mutation", help="Optional: if set, this option will return the count of bases at the given position(s) in a .mutation.tsv file. Takes as input a file with \
-                        chromosome and position (tab-delimited).")
+                        chromosome and position pairs (tab-delimited).")
 
     args = parser.parse_args()
 
@@ -243,17 +217,14 @@ def main():
             ref_coverage = list(ref_coverage.values())[0]
             norm_gene_coverage = region_normalisation(gene_coverage, ref_coverage)
 
-            if isinstance(ref_coverage, str):
-                print(f"Could not compute a normalised depth of coverage in {bam_file}.")
-
             # Append coverage values to the all_coverage dictionary
             for gene, coverage in norm_gene_coverage.items():
                 all_coverage[gene].append(coverage)
 
             # Check the gene_coverage and processing depth data
             for gene, coverage in norm_gene_coverage.items():
-                if coverage != "NA" and coverage > args.plot_treshold or args.plot_force:
-                    continue
+                if coverage > args.plot_treshold:
+                    print(f"The {gene} locus in {bam_file} is duplicated.")
 
                     # Depth file creation to produce a plot
                     if args.plot_interval and args.plot:
@@ -282,13 +253,10 @@ def main():
 
                     elif args.plot_extension and args.plot:
                         totalspan = get_totalspan(args.region, gene)
-                        if totalspan is None or len(totalspan) < 3:
-                            print(f"Warning: Invalid totalspan for gene {gene} in BED file. Skipping.")
-                            continue
-                        print(f"Debug: chromosome={chromosome}, plotStart={plotStart}, plotStop={plotStop}")
-
+                        if totalspan is None:
+                            print(f"Warning: No intervals found for gene {gene} in BED file.")
+                            continue                    
                         chromosome, plotStart, plotStop = totalspan
-                        
                         # Adjust plotStart and plotStop according to args.plot_extension
                         plotStart -= args.plot_extension
                         plotStop += args.plot_extension
@@ -298,7 +266,7 @@ def main():
                         depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span)]                   
 
                     else:
-                        continue
+                        print("If --plot is set, either --plot_interval, --plot_proportion or --plot_extension should be provided.")
                     
                     samfile.close()
                     d = pd.DataFrame(depth_data, columns=["pos", "depth"])  # Convert depth data into a DataFrame
@@ -357,42 +325,41 @@ def main():
 
 
                     # Plotting
-                    if args.plot or args.plot_force:
-                        plt.figure(figsize=(10, 6))
-                        plt.plot(d.pos, d.norm, label="Normalised Depth of Coverage", color="lightsteelblue")
-                        if args.breakpoint == "ruptures":
-                            for i, b in enumerate(result[:-1]):
-                                plt.axvline(d.loc[b]["pos"], color="red", linestyle="-", linewidth=0.6) 
-                                plt.text(d.loc[b]["pos"], d.loc[b]["norm"], f"{i+1}", color="red", fontsize=10)  # Add breakpoint number
-                            plt.title("Depth of Coverage with Ruptures detected breakpoints")
-                        elif args.breakpoint == "rollingaverage":
-                            for i, region in enumerate(regions):
-                                region_center = (region[0] + region[1]) / 2
-                                region_data = d[(d['pos'] >= region[0]) & (d['pos'] <= region[1])]
-                                if not region_data.empty:
-                                    max_norm_depth_index = region_data['norm'].idxmax()
-                                    max_norm_depth = region_data.loc[max_norm_depth_index, 'norm']
-                                    plt.axvspan(region[0], region[1], color='red', alpha=0.2)
-                                    plt.text(region_center, max_norm_depth + 0.1, f"{i+1}", color="red", fontsize=10)  # Add region number
-                            plt.title("Depth of Coverage with Rolling Average detected breakpoints")
-                        else: 
-                            plt.title("Depth of Coverage")
-                        if args.plot_gene_pos:
-                            totalspan = get_totalspan(args.region, gene)
-                            plt.axvline(totalspan[1], color="purple", linestyle="-", linewidth=0.8)
-                            plt.axvline(totalspan[2], color="purple", linestyle="-", linewidth=0.8)
-                        plt.plot(d.pos, d.moving_average, label="Smoothed Depth of Coverage", color="black")
-                        plt.suptitle(f"{gene} locus in {bam_file}", fontsize=16)
-                        plt.xlabel(f"Genomic position: {str_incr_span}")
-                        plt.ylabel("Normalised Depth of Coverage")
-                        plt.legend()
-                        
-                        # Save the plot file
-                        plt.savefig(f"{bam_name}_{gene}_plot.{args.plot}")
-                        plt.close()
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(d.pos, d.norm, label="Normalised Depth of Coverage", color="lightsteelblue")
+                    if args.breakpoint == "ruptures":
+                        for i, b in enumerate(result[:-1]):
+                            plt.axvline(d.loc[b]["pos"], color="red", linestyle="-", linewidth=0.6) 
+                            plt.text(d.loc[b]["pos"], d.loc[b]["norm"], f"{i+1}", color="red", fontsize=10)  # Add breakpoint number
+                        plt.title("Depth of Coverage with Ruptures detected breakpoints")
+                    elif args.breakpoint == "rollingaverage":
+                        for i, region in enumerate(regions):
+                            region_center = (region[0] + region[1]) / 2
+                            region_data = d[(d['pos'] >= region[0]) & (d['pos'] <= region[1])]
+                            if not region_data.empty:
+                                max_norm_depth_index = region_data['norm'].idxmax()
+                                max_norm_depth = region_data.loc[max_norm_depth_index, 'norm']
+                                plt.axvspan(region[0], region[1], color='red', alpha=0.2)
+                                plt.text(region_center, max_norm_depth + 0.1, f"{i+1}", color="red", fontsize=10)  # Add region number
+                        plt.title("Depth of Coverage with Rolling Average detected breakpoints")
+                    else: 
+                        plt.title("Depth of Coverage")
+                    if args.plot_gene_pos:
+                        totalspan = get_totalspan(args.region, gene)
+                        plt.axvline(totalspan[1], color="purple", linestyle="-", linewidth=0.8)
+                        plt.axvline(totalspan[2], color="purple", linestyle="-", linewidth=0.8)
+                    plt.plot(d.pos, d.moving_average, label="Smoothed Depth of Coverage", color="black")
+                    plt.suptitle(f"{gene} locus in {bam_file}", fontsize=16)
+                    plt.xlabel(f"Genomic position: {str_incr_span}")
+                    plt.ylabel("Normalised Depth of Coverage")
+                    plt.legend()
+                    
+                    # Save the plot file
+                    plt.savefig(f"{bam_name}_{gene}_plot.{args.plot}")
+                    plt.close()
 
         except Exception as e:
-            print(f"{bam_file}: {e}")
+            print(f"Error computing normalised depth of coverage in {bam_file}: {e}")
 
     # Write the results to a single TSV file
     coverage_output_file = f"{args.outfile}_coverage.tsv"
@@ -400,80 +367,23 @@ def main():
         header = "gene_name\t" + "\t".join(bam_files) + "\n"
         f.write(header)
         for gene, coverages in all_coverage.items():
-            coverage_str = []
-            for cov in coverages:
-                if isinstance(cov, float):
-                    coverage_str.append(str(round(cov,1)))
-                else:
-                    coverage_str.append(cov if cov != 'NA' else 'NA')
-            line = f"{gene}\t" + "\t".join(coverage_str) + "\n"
+            line = f"{gene}\t" + "\t".join(map(lambda x: str(round(x,1)), coverages)) + "\n"
             f.write(line)
     print(f"Coverage data saved to {coverage_output_file}")
 
-    elapsed_time = round(time.time() - start_time,1)
+    elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time} seconds")
 
+    # Output mutations if provided
     if args.mutation:
-        # Initialize a dictionary to hold mutation counts per mutation_id across all BAM files
-        mutation_data = {}
+        with open(args.mutation, 'r') as f:
+            with open("{args.outfile}.mutations.tsv", 'w') as out_file:
+                out_file.write("sample\tchromosome:position\tA\tT\tC\tG\tdepth\n")
+                for line in f:
+                    chromosome, position = line.strip().split('\t')
+                    nucleotide_counts, total_depth = calculate_nucleotide_counts(args.bam, chromosome, position)
+                    out_file.write(f"{bam_name}\t{chromosome}:{position}\t{nucleotide_counts['A']}\t{nucleotide_counts['T']}\t{nucleotide_counts['C']}\t{nucleotide_counts['G']}\t{total_depth}\n")
+        print("Genotyping file was generated successfully.")
 
-        # Read mutation positions and chromosomes from the provided file
-        with open(args.mutation, 'r') as mutation_file:
-            for line in mutation_file:
-                parts = line.strip().split('\t')
-                chromosome = parts[0]
-                position = parts[1]
-                mutation_name = parts[2] if len(parts) > 2 else "noname"  # Default to "noname"
-
-                # Create a unique identifier for each mutation
-                mutation_id = f"{chromosome}:{position}:{mutation_name}"
-
-                # Initialize an empty dictionary for each mutation_id to store BAM file counts
-                mutation_data[mutation_id] = {}
-
-                for bam_file in bam_files:
-                    try:
-                        nucleotide_counts, total_depth = calculate_nucleotide_counts(bam_file, chromosome, position)
-
-                        # Store counts in the dictionary
-                        mutation_data[mutation_id][bam_file] = {
-                            'A': nucleotide_counts['A'],
-                            'T': nucleotide_counts['T'],
-                            'C': nucleotide_counts['C'],
-                            'G': nucleotide_counts['G'],
-                            'depth': total_depth
-                        }
-
-                    except Exception as e:
-                        print(f"Error processing {mutation_id} in {bam_file}: {e}")
-                        # If there's an error, store 'NA' to indicate missing data
-                        mutation_data[mutation_id][bam_file] = {
-                            'A': 'NA',
-                            'T': 'NA',
-                            'C': 'NA',
-                            'G': 'NA',
-                            'depth': 'NA'
-                        }
-
-        # Write the mutation data to the output file in a matrix format
-        mutation_output_file = f"{args.outfile}_mutations.tsv"
-        with open(mutation_output_file, 'w') as out_file:
-            # Header row: mutation IDs followed by BAM file names
-            out_file.write("mutation_id\t" + "\t".join(bam_files) + "\n")
-
-            # For each mutation, write mutation counts and depths for each BAM file
-            for mutation_id, bam_counts in mutation_data.items():
-                row = [mutation_id]
-                for bam_file in bam_files:
-                    if bam_file in bam_counts:
-                        counts = bam_counts[bam_file]
-                        # Format counts as A=5;T=10;C=3;G=2;depth=20
-                        count_str = f"A={counts['A']};T={counts['T']};C={counts['C']};G={counts['G']};depth={counts['depth']}"
-                    else:
-                        count_str = "A=NA;T=NA;C=NA;G=NA;depth=NA"
-                    row.append(count_str)
-                out_file.write("\t".join(row) + "\n")
-
-        print(f"Mutation data saved to {mutation_output_file}")
 if __name__ == "__main__":
     main()
