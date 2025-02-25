@@ -1,7 +1,7 @@
 cff-version: 1.1.0
 message: "If you use this software, please cite it as below."
 authors:
-- family-name: "Claret"
+- family-names: "Claret"
   given-names "Jean-Loup"
   orcid: "https://orcid.org/0000-0002-1397-5638"
 title: "Ar(chitecture of)Du(plications)"
