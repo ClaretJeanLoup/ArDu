@@ -5,7 +5,7 @@ authors:
   given-names "Jean-Loup"
   orcid: "https://orcid.org/0000-0002-1397-5638"
 title: "Ar(chitecture of)Du(plications)"
-DOI: 10.5281/zenodo.14922764
+doi: 10.5281/zenodo.14922764
 version: 1.0.0
 date-released: 2025-02-25
 url: "https://github.com/ClaretJeanLoup/ArDu"
