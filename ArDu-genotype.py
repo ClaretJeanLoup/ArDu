@@ -26,7 +26,7 @@ def calculate_nucleotide_counts(bam_file, chromosome, position):
 def main():
     # Mandatory arguments
     parser = argparse.ArgumentParser(description="Genotype sample by screening diagnostic point mutations")
-    parser.add_argument("-b", "--bam", help="Input a list of BAM files (one per line)")
+    parser.add_argument("-b", "--bam", required=True, help="Input a list of BAM files (one per line)")
     parser.add_argument("-o", "--outfile", required=True, help="Prefix for output file names")
     parser.add_argument("-m","--mutation", required=True, help="Takes as input a tab-delimited file\
                          with the following columns: chromosome, position and an optional third column containing the name of the muations you're screening for.")
