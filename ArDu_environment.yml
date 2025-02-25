@@ -85,4 +85,3 @@ dependencies:
   - xorg-libxdmcp=1.1.5=hd74edd7_0
   - zlib=1.3.1=h8359307_2
   - zstd=1.5.6=hb46c0d2_0
-prefix: /Users/jeacl133/miniconda3/envs/ardu
