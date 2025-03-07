@@ -1,17 +1,17 @@
 # Introducing Ar(chitecture of)Du(plications)
 **Please bear with us as this readme -like ArDu- is still under construction. WIP**
 
-ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on any machine and it is made to be modular and easy to modify by its users to accommodate their specific needs. ArDu depends on a few Python packages that can be found in the `.yml` file available under the main branch of the Git repository.
+ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
+ArDu depends on a few Python packages that can be found in the `.yml` file available in the main branch of the Git repository.
 
 ## Gene Copy Number Estimates
 
-ArDu's main script uses the information from depth of coverage BAM alignment files to compute a proxy of gene copy number for target loci. It uses the depth of coverage of a reference genomic region to compute a normalized depth of coverage for the target loci that can be used as a direct proxy of its copy number (Claret et al. 2023). 
+ArDu uses information from BAM alignment files to estimate a target loci copy number. The target's depth of coverage is normalised by a user-provided reference loci. Depending on the reference used, this normalised depth can be directly used a a copy number proxy (Claret et al. 2023), see best practises.
 
 ### Word of Caution and best practises 
 
-The choice of the reference is paramount in the quality of the copy number estimate. From entire chromosomes to the exonic sequences of housekeeping genes, a wide array of genomic intervals can be used as a reference. However, we have seen an improvement in the estimation with the use of exonic sequences of a housekeeping gene.
-
-While there are plenty of other copy number variants annotation tools that work on a genome-wide scale, ArDu is specifically designed to approach candidate loci.
+The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation (WIP).
+There are many copy number variant annotation tools that work on a genome-wide scale, but ArDu is specifically designed around a candidate locus approach, while you can use it on a large number of targets or even the entirety of an assembly annotation, it is not its intended use (expect long run times and little usability in the results).
 
 **DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
 
