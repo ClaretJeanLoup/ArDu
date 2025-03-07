@@ -17,12 +17,12 @@ There are many copy number variant annotation tools that work on a genome-wide s
 
 | Argument               | Description                                                                                                            | Default / Example                    |
 |------------------------|------------------------------------------------------------------------------------------------------------------------|--------------------------------------|
-| **Mandatory Arguments** |                                                                                                                        |                                      |
+| **Mandatory Arguments**|
 | `-b, --bam`           | A list of BAM files (one per line). Example format: <br> `~/bamfiles/sample1.bam` <br> `~/bamfiles/sample2.bam`   |                     |
 | `-r, --region`        | A 4-column tab delimited file. Regions with the same name will be pooled. Example format: <br> `chr1\t12000\t12200\tTarget1` <br> `chromosome\tstart\tstop\tname` <br> `chr1\t12400\t12600\tTarget1` <br> `chr2\t26000\t26200\tReference` <br> `chr2\t26400\t26600\tReference` | |
 | `-n, --norm`         | Name of the region to use for normalisation. This name MUST be present in the regions file.                                   |                               |
 | `-o, --outfile`       | Prefix for output file names.                                                                                          |                      |
-| **Plotting Arguments** |                                                                                                                        |                                      |
+| **Plotting Arguments**|
 | `--plot`              | Optional: produces a plot of the raw and normalised depth of coverage. Accepts the following extensions: png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, putative breakpoints will be plotted. | `None`                               |
 | `--plot_threshold`    | Threshold value to consider a duplication. Default value is 1.5, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a single-copy and a duplicated copy of a given gene. | `1.5`                                |
 | `--plot_interval`     | A tab-delimited file containing specific genomic intervals used for plotting, format: <br>`gene_name\tchromosome:start-stop`. | `None`                               |
@@ -33,7 +33,7 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | `--plot_gene_pos`     | When set, add vertical lines to indicate the duplicated gene position on the plot.                                      | `False`                              |
 | `--plot_force`        | Forces plotting regardless of depth of coverage value.                                                                  | `False`                              |
 | `--plot_covar`        | Plots the covariance between mean depth of coverage and the variance instead of the mean depth of coverage.            | `False`                              |
-| **Breakpoints Detection** |                                                                                                                      |                                      |
+| **Breakpoints Detection**  |
 | `--breakpoint`        | Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. <br> 'ruptures' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --bkp_model, --bkp_pen or --bkp_nb. <br> 'rollingaverage' uses successive rolling average to detect shifts in depth of coverage. Associated options are --bkp_slw, --bkp_threshold, and --bkp_passes. <br> Setting this argument will create a '.breakpoints.tsv' output file containing the positions found by the rupture package, or the regions with depth of coverage shifting found with 'rollingaverage'. | `None`                               |
 | `--bkp_slw`           | Window size for ruptures model and rolling average calculation. Default= 1 kb.                                          | `1000`                               |
 | `--bkp_nb`            | Number of expected breakpoints in this structure, cannot be used alongside --bkp_pen.                                   | `None`                               |
