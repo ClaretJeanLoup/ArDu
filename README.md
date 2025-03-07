@@ -1,5 +1,5 @@
 # Introducing Ar(chitecture of)Du(plications)
-**Please bear with us as this readme -like ArDu- is still under construction. WIP**
+**Please bear with us as this readme -like ArDu- is still a Work In Progress**
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
 ArDu depends on a few Python packages that can be found in the `.yml` file available in the main branch of the Git repository.
@@ -10,7 +10,7 @@ ArDu uses information from BAM alignment files to estimate a target loci copy nu
 
 ### Word of Caution and best practises 
 
-The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation (WIP).
+The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. WIP: An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation.
 There are many copy number variant annotation tools that work on a genome-wide scale, but ArDu is specifically designed around a candidate locus approach, while you can use it on a large number of targets or even the entirety of an assembly annotation, it is not its intended use (expect long run times and little usability in the results).
 
 **DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
