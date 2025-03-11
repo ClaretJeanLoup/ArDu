@@ -19,8 +19,8 @@ There are many copy number variant annotation tools that work on a genome-wide s
 |------------------------|------------------------------------------------------------------------------------------------------------------------|--------------------------------------|
 | **Mandatory Arguments**|
 | `-b, --bam`           | A list of BAM files (one per line). Example format: <br> `~/bamfiles/sample1.bam` <br> `~/bamfiles/sample2.bam`   |                     |
-| `-r, --region`        | A 4-column tab delimited file. Regions with the same name will be pooled. Example format: <br> `chr1\t12000\t12200\tTarget1` <br> `chromosome\tstart\tstop\tname` <br> `chr1\t12400\t12600\tTarget1` <br> `chr2\t26000\t26200\tReference` <br> `chr2\t26400\t26600\tReference` | |
-| `-n, --norm`         | Name of the region to use for normalisation. This name MUST be present in the regions file.                                   |                               |
+  | `-r, --region`        | A 4-column tab delimited file. Regions with the same name will be pooled. Example format chromosome  start  stop  name, e.g. <br> `chr1  12000  12200  Target1` <br> `chr1  12400  12600  Target1` <br> `chr2  26000  26200  Reference` <br> `chr2  26400  26600  Reference` | |
+| `-n, --norm`         | Name of the region to use for normalisation. This name **MUST** be present in the regions file, e.g. Reference in the example provided above.                                  |                               |
 | `-o, --outfile`       | Prefix for output file names.                                                                                          |                      |
 | **Plotting Arguments**|
 | `--plot`              | Optional: produces a plot of the raw and normalised depth of coverage. Accepts the following extensions: png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, putative breakpoints will be plotted. | `None`                               |
@@ -43,7 +43,7 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | `--bkp_threshold`     | Threshold for detecting shifts in depth of coverage.                                                                    | `1.0`                                |
 | `--bkp_passes`        | Number of rolling average passes. Increasing will lessen the overall variation in depth of coverage.                   | `1`                                  |
 | **Genotyping**        |                                                                                                                        |                                      |
-| `--mutation`          | Optional: If set, this option will return the number of reads supporting each nucleotide at the given position(s) in a `.mutation.tsv` file. Takes as input a tab-delimited file formated as follows: <br>`chromosome\t position\tmutation_name(optional)`. | `None`                               |
+| `--mutation`          | Optional: If set, this option will return the number of reads supporting each nucleotide at the given position(s) in a `.mutation.tsv` file. Takes as input a tab-delimited file formated as follows: <br>`chromosome   position  mutation_name(optional)`. | `None`                               |
 
 
 ## Example run with bare minimum options:
