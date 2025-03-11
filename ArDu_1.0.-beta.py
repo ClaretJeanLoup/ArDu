@@ -15,7 +15,6 @@ import pandas as pd
 import pysam
 import ruptures as rpt
 from tqdm import tqdm
-from sklearn.linear_model import LinearRegression
 
 # Function for rolling average smoothing
 def window_average(arr: np.ndarray, w: int):
