@@ -15,7 +15,7 @@ There are many copy number variant annotation tools that work on a genome-wide s
 
 **DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
 
-| Argument               | Description                                                                                                            | Default / Example                    |
+| Argument               | Description                                                                                                            | Default                     |
 |------------------------|------------------------------------------------------------------------------------------------------------------------|--------------------------------------|
 | **Mandatory Arguments**|
 | `-b, --bam`           | A list of BAM files (one per line). Example format: <br> `~/bamfiles/sample1.bam` <br> `~/bamfiles/sample2.bam`   |                     |
