@@ -102,7 +102,7 @@ def get_regions(regions):
     regions_dict = {}
     with open(regions, "r") as f:
         for line_str in f:
-            if not line_str.strip() or line_str.startswith("#") or (len(columns) >= 3 and columns[1].isalpha() and columns[2].isalpha()):  # Skip empty lines and header 
+            if not line_str.strip() or line_str.startswith("#") :  # Skip empty lines and header 
                 continue
             line = line_str.strip().split('\t')
             if len(line) != 4:
