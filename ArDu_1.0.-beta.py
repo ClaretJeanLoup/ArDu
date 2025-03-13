@@ -16,7 +16,6 @@ import pysam
 import ruptures as rpt
 from tqdm import tqdm
 
-# Function for rolling average smoothing
 def window_average(arr: np.ndarray, w: int):
     numbers_series = pd.Series(arr)
     windows = numbers_series.rolling(w, center=True, min_periods=1)  # Use center=True to align the window
@@ -103,7 +102,7 @@ def get_regions(regions):
     regions_dict = {}
     with open(regions, "r") as f:
         for line_str in f:
-            if not line_str.strip() or line_str.startswith("#"):  # Skip empty lines
+            if not line_str.strip() or line_str.startswith("#") or (len(columns) >= 3 and columns[1].isalpha() and columns[2].isalpha()):  # Skip empty lines and header 
                 continue
             line = line_str.strip().split('\t')
             if len(line) != 4:
