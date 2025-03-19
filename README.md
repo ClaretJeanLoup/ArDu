@@ -13,7 +13,7 @@ ArDu uses information from BAM alignment files to estimate a target loci copy nu
 The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. WIP: An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation.
 There are many copy number variant annotation tools that work on a genome-wide scale, but ArDu is specifically designed around a candidate locus approach, while you can use it on a large number of targets or even the entirety of an assembly annotation, it is not its intended use (expect long run times and little usability in the results).
 
-**DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
+## Options 
 
 | Argument               | Description                                                                                                            | Default                     |
 |------------------------|------------------------------------------------------------------------------------------------------------------------|--------------------------------------|
@@ -47,9 +47,26 @@ There are many copy number variant annotation tools that work on a genome-wide s
 
 ## Command line examples
 ### Example run with bare minimum options:
-python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
-### Example run with plotting and breakpoints:
-python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
-  --plot png --plot_threshold 1.4 --breakpoint ruptures --bkp_model l2 --bkp_pen 10
+`python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix`
 
+### Example run with plotting and breakpoints:
+```
+python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
+--plot png --plot_threshold 1.4 --breakpoint ruptures --bkp_model l2 --bkp_pen 10 
+```
+
+## Output files
+### _coverage.tsv
+Base ArDu (see _run with bare minimum option_ above) produces a _coverage.tsv file containing all the target loci depth of coverage statistics in lines, one column per bam file screened. Format is raw depth of coverage; mean depth of coverage; SD; median depth of coverage; normalised depth of coverage (ie copy number proxy).
+
+### Plots
+If --plot and either --plot_interval or --plot_proportion are set, a graphic representation of the duplicated loci will be produced in the requested format (png, jpeg, jpg, pdf, svg, eps). Target loci position can be plotted with --plot_gene_pos. If used conjointly with --breakpoint, the predicted breakpoints will be plotted and numbered in the same order as outputed in the _breakpoint.tsv file. 
+
+### _breakpoints.tsv
+If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
+
+## Reference
+If you use ArDu, please cite:
+Claret Jean-Loup, Mestre Camille, Milesi Pascal and Labbé Pierrick, _in prep_.
+**DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
 
