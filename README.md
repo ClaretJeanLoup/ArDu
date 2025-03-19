@@ -56,19 +56,16 @@ python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
 ```
 
 ## Output files
-### _coverage.tsv
+### _output_prefix_ _coverage.tsv
 Base ArDu (see _run with bare minimum option_ above) produces a _coverage.tsv file containing all the target loci depth of coverage statistics in lines, one column per bam file screened. Format is raw depth of coverage; mean depth of coverage; SD; median depth of coverage; normalised depth of coverage (ie copy number proxy).
 
 ### Plots
 If --plot and either --plot_interval or --plot_proportion are set, a graphic representation of the duplicated loci will be produced in the requested format (png, jpeg, jpg, pdf, svg, eps). Target loci position can be plotted with --plot_gene_pos. If used conjointly with --breakpoint, the predicted breakpoints will be plotted and numbered in the same order as outputed in the _breakpoint.tsv file. 
 
-### _breakpoints.tsv
+### _output_prefix_ _breakpoints.tsv
 If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
 
-### _breakpoints.tsv
-If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
-
-### _breakpoints.tsv
+### _output_prefix_ _mutation.tsv
 If --mutation is set, ArDu will output a _mutation.tsv file containign all nucleotides and total depth for the given position, format A=;T=;C=;G=;total_depth=. 
 
 ## Reference
