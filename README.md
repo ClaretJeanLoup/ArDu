@@ -65,6 +65,12 @@ If --plot and either --plot_interval or --plot_proportion are set, a graphic rep
 ### _breakpoints.tsv
 If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
 
+### _breakpoints.tsv
+If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
+
+### _breakpoints.tsv
+If --mutation is set, ArDu will output a _mutation.tsv file containign all nucleotides and total depth for the given position, format A=;T=;C=;G=;total_depth=. 
+
 ## Reference
 If you use ArDu, please cite:
 Claret Jean-Loup, Mestre Camille, Milesi Pascal and Labbé Pierrick, _in prep_.
