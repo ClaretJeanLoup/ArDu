@@ -45,10 +45,10 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | **Genotyping**        |                                                                                                                        |                                      |
 | `--mutation`          | Optional: If set, this option will return the number of reads supporting each nucleotide at the given position(s) in a `.mutation.tsv` file. Takes as input a tab-delimited file formated as follows: <br>`chromosome   position  mutation_name(optional)`. | `None`                               |
 
-
-## Example run with bare minimum options:
+## Command line examples
+### Example run with bare minimum options:
 python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
-## Example run with plotting and breakpoints:
+### Example run with plotting and breakpoints:
 python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
   --plot png --plot_threshold 1.4 --breakpoint ruptures --bkp_model l2 --bkp_pen 10
 
