@@ -18,7 +18,7 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | Argument               | Description                                                                                                            | Default                     |
 |------------------------|------------------------------------------------------------------------------------------------------------------------|--------------------------------------|
 | **Mandatory Arguments**|
-| `-b, --bam`           | A list of BAM files (one per line). Example format: <br> `~/bamfiles/sample1.bam` <br> `~/bamfiles/sample2.bam`   |                     |
+| `-b, --bam`           | A list of BAM files (one per line). Example format: <br> `~/bamfiles/sample1.bam` <br> `~/bamfiles/sample2.bam` <br> NOTE : all bam files must be indexed `samtools index bamfile.bam` and the indexes must be in the same directory as their respective bam files.  |                     |
   | `-r, --region`        | A 4-column tab delimited file. Regions with the same name will be pooled. Example format _chromosome  start  stop  name_, e.g. <br> `chr1  12000  12200  Target1` <br> `chr1  12400  12600  Target1` <br> `chr2  26000  26200  Reference` <br> `chr2  26400  26600  Reference` | |
 | `-n, --norm`         | Name of the region to use for normalisation. This name **MUST** be present in the regions file, e.g. Reference in the example provided above.                                  |                               |
 | `-o, --outfile`       | Prefix for output file names.                                                                                          |                      |
@@ -47,7 +47,9 @@ There are many copy number variant annotation tools that work on a genome-wide s
 
 ## Command line examples
 ### Example run with bare minimum options:
-`python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix`
+```
+python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
+```
 
 ### Example run with plotting and breakpoints:
 ```
