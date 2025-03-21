@@ -1,15 +1,29 @@
 # Introducing Ar(chitecture of)Du(plications)
-**Please bear with us as this readme -like ArDu- is still a Work In Progress**
+**Please bear with me as this readme -like ArDu- is still a Work In Progress**
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
-ArDu depends on a few Python packages that can be found in the `.yml` file available in the main branch of the Git repository.
 
-## Gene Copy Number Estimates
+## Installation and debugging. 
+Simply download the main ArDu script and install it's dependencies. They are all listed in the `ArDu_environment.yml` file. Given that all dependencies are satistfied, ArDu can be used like any other python script. Here are some basic errors that you could encounter and how to fix them:
+```
+Processing TestRun
+Processing genes:   0%|                                   | 0/2 [00:00<?, ?it/s]
+Error processing BAM file TestRun.bam: no index available for pileup
+```
+--> No indexes found in the bam directory. Check for their presence and make sure their names match those of the bam. 
 
-ArDu uses information from BAM alignment files to estimate a target loci copy number. The target's depth of coverage is normalised by a user-provided reference loci. Depending on the reference used, this normalised depth can be directly used a a copy number proxy (Claret et al. 2023), see best practises.
+```
+Processing TestRun
+Processing genes:   0%|                                   | 0/3 [00:00<?, ?it/s]
+Error processing BAM file TestRun.bam: invalid literal for int() with base 10: 'st'
+```
+--> Invalid line in the -r target file. Most likely the file contains a header that should be removed. Next version of ArDu will skip those lines. 
 
-### Word of Caution and best practises 
 
+
+## Gene Copy Number Estimates, Word of Caution and best practises 
+
+ArDu uses information from BAM alignment files to estimate a target loci copy number. The target's depth of coverage is normalised by a user-provided reference loci. Depending on the reference used, this normalised depth can be directly used a a copy number proxy (Claret et al. 2023). 
 The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. WIP: An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation.
 There are many copy number variant annotation tools that work on a genome-wide scale, but ArDu is specifically designed around a candidate locus approach, while you can use it on a large number of targets or even the entirety of an assembly annotation, it is not its intended use (expect long run times and little usability in the results).
 
