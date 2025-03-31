@@ -3,6 +3,12 @@ authors:
 - family-names: "Claret"
   given-names: "Jean-Loup"
   orcid: "https://orcid.org/0000-0002-1397-5638"
+- family-names: "Mestre"
+  given-names: "Camille"
+- family-names: "Labbé"
+  given-names: "Pierrick"
+- family-names: "Milesi"
+  given-names: "Pascal"
 title: "Ar(chitecture of)Du(plications)"
 version: 1.0.0
 doi: 10.5281/zenodo.14922764
