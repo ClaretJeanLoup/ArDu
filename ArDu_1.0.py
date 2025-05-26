@@ -538,8 +538,8 @@ def main():
             # Write custom header lines
             f.write("# ArDu coverage outfile\n")
             f.write("# Generated on: " + str(pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')) + "\n")
-            f.write("# Format LOCI  μDoC:sdDoC:medDoC:CovBases:RCN\n")
-            f.write("# μDOC: mean Depth of Coverage over the entire locus span.\n")
+            f.write("# Format LOCI  uDoC:sdDoC:medDoC:CovBases:RCN\n")
+            f.write("# uDOC: mean Depth of Coverage over the entire locus span.\n")
             f.write("# sdDOC:standard deviation of mean Depth of Coverage.\n")
             f.write("# medDoC:median Depth of Coverage over the entire locus span.\n")
             f.write("# RCN: relative copy number.\n")
