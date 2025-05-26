@@ -58,7 +58,7 @@ def window_variance(arr: np.ndarray, w: int):
     return moving_variances
 
 def calculate_coverage_stats(regions, bam_file, quantile):
-    """Compute mean, median, and standard deviation of coverage for each gene."""
+    """Compute mean, median, and standard deviation from depth of coverage for each gene."""
     data_list = []
     try:
         total_genes = len(regions)
@@ -222,7 +222,7 @@ def main():
     parser.add_argument("-o", "--outfile", required=True, help="Prefix for output file names")
 
     #Optional arguments
-    parser.add_argument("-q","--quantile", type=float, help="Set the quantile of depth of coverage that is excluded from all analyses.")
+    parser.add_argument("-q","--quantile", type=float, help="Set the quantile of depth of coverage that is excluded from all analyses.DEPRECATED") #deprecated
 
     ## Plotting
     parser.add_argument("--plot", 
@@ -301,7 +301,8 @@ def main():
     date_str = time.strftime("%Y-%m-%d")
     ArDuBase = os.path.splitext(os.path.basename(args.bam))[0]
     ArDuBaseRun = f"{ArDuBase}-{date_str}"
-
+    output_dir = f"ArDuRun-{ArDuBaseRun}/"
+    os.makedirs(output_dir, exist_ok=True)
 
     # Check if the provided bam is a valid file path
     with open(args.bam, 'r') as f:
@@ -348,8 +349,6 @@ def main():
             if not args.plot:
                 continue
             else:
-                output_dir = f"ArDuRUN-{ArDuBaseRun}-plots"
-                os.makedirs(output_dir, exist_ok=True)
                 if args.plot_force:
                     filtered_genes_df = gene_coverage_df[gene_coverage_df['gene'] != args.norm]
                 else:
@@ -505,7 +504,9 @@ def main():
                         add_plot_params_box(fig, args)
 
                     plt.tight_layout()
-                    plt.savefig(os.path.join(output_dir, f"{bam_name}_{gene}_plot.{args.plot}"),
+                    output_dirgene = f"{output_dir}/{gene}-plots/"
+                    os.makedirs(output_dirgene, exist_ok=True)
+                    plt.savefig(os.path.join(output_dirgene, f"{bam_name}_{gene}_plot.{args.plot}"),
                                 bbox_inches='tight', dpi=args.plot_dpi)
                     plt.close()
 
@@ -530,20 +531,23 @@ def main():
         pivot_df = pivot_df[cols]
         
         # Output file name
-        coverage_output_file = f"{args.outfile}_coverage.tsv"
+        coverage_output_file = f"{output_dir}/{args.outfile}_coverage.tsv"
         
         # Open the file to write the header and data
         with open(coverage_output_file, 'w') as f:
             # Write custom header lines
             f.write("# ArDu coverage outfile\n")
             f.write("# Generated on: " + str(pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')) + "\n")
-            f.write("# Format LOCI  meanDOC:SDDOC:medianDOC:CoveredBases:CopyNumber\n")
-            
+            f.write("# Format LOCI  μDoC:sdDoC:medDoC:CovBases:RCN\n")
+            f.write("# μDOC: mean Depth of Coverage over the entire locus span.\n")
+            f.write("# sdDOC:standard deviation of mean Depth of Coverage.\n")
+            f.write("# medDoC:median Depth of Coverage over the entire locus span.\n")
+            f.write("# RCN: relative copy number.\n")
             # Write the actual data from the DataFrame
             pivot_df.to_csv(f, sep='\t', index=False)
             
 
-        print(f"Coverage data saved to {coverage_output_file}")
+        print(f"Coverage data saved to {output_dir}/{coverage_output_file}")
     else:
         print("No coverage data to write.")
 
@@ -552,9 +556,9 @@ def main():
     # Combines the breakpoints df into a single one and write to out 
     if breakpoints_data:
         bp_df = pd.DataFrame(breakpoints_data)
-        breakpoints_output_file = f"{args.outfile}_breakpoints.tsv"
+        breakpoints_output_file = f"{output_dir}/{args.outfile}_breakpoints.tsv"
         bp_df.to_csv(breakpoints_output_file, sep='\t', index=False)
-        print(f"Breakpoints data saved to {breakpoints_output_file}")
+        print(f"Breakpoints data saved to {output_dir}/{breakpoints_output_file}")
 
 
 
@@ -588,7 +592,7 @@ def main():
                             'G': 'NA',
                             'depth': 'NA'
                         }
-        mutation_output_file = f"{args.outfile}_mutations.tsv"
+        mutation_output_file = f"{output_dir}/{args.outfile}_mutations.tsv"
         with open(mutation_output_file, 'w') as out_file:
             out_file.write("mutation_id\t" + "\t".join(bam_files) + "\n")
             for mutation_id, bam_counts in mutation_data.items():
@@ -601,7 +605,7 @@ def main():
                         count_str = "A=NA;T=NA;C=NA;G=NA;depth=NA"
                     row.append(count_str)
                 out_file.write("\t".join(row) + "\n")
-        print(f"Mutation data saved to {mutation_output_file}")
+        print(f"Mutation data saved to {output_dir}/{mutation_output_file}")
 
     elapsed_time = round(time.time() - start_time, 1)
     print(f"Elapsed time: {elapsed_time} seconds")
