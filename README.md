@@ -21,7 +21,7 @@ Error processing BAM file TestRun.bam: invalid literal for int() with base 10: '
 
 
 
-## Gene Copy Number Estimates, Word of Caution and best practises 
+## Gene Copy Number Estimates, word of caution and best practises 
 
 ArDu uses information from BAM alignment files to estimate a target loci copy number. The target's depth of coverage is normalised by a user-provided reference loci. Depending on the reference used, this normalised depth can be directly used a a copy number proxy (Claret et al. 2023). 
 The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. WIP: An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation.
@@ -38,11 +38,11 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | `-o, --outfile`       | Prefix for output file names.                                                                                          |                      |
 | **Plotting Arguments**|
 | `--plot`              | Optional: produces a plot of the raw and normalised depth of coverage. Accepts the following extensions: png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, putative breakpoints will be plotted. | `None`                               |
-| `--plot_threshold`    | Threshold value to consider a duplication. Default value is 1.5, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a single-copy and a duplicated copy of a given gene. | `1.5`                                |
-| `--plot_interval`     | A tab-delimited file containing specific genomic intervals used for plotting, format: <br>`gene_name\tchromosome:start-stop`. | `None`                               |
-| `--plot_proportion`   | Set the plotting interval to X times the size of the total gene span. Default = 2.                                      | `2`                                  |
-| `--plot_slw`          | Sliding window size (bp) used for coverage representation, higher values result in a smoother depth of coverage.      | `1000`                               |
-| `--plot_min_norm_depth`| Minimum normalised depth of coverage to use for plotting.                                                             | `None`                               |
+| `--plot-threshold`    | Threshold value to consider a duplication. Default value is 1.5, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a single-copy and a duplicated copy of a given gene. | `1.5`                                |
+| `--plot-interval`     | A tab-delimited file containing specific genomic intervals used for plotting, format: <br>`gene_name\tchromosome:start-stop`. | `None`                               |
+| `--plot-proportion`   | Set the plotting interval to X times the size of the total gene span. Default = 2.                                      | `2`                                  |
+| `--plot-slw`          | Sliding window size (bp) used for coverage representation, higher values result in a smoother depth of coverage.      | `1000`                               |
+| `--plot-ylim`| Set Y-axis limits, format as two space separated numbers (e.g. 1 10). To keep minimum or maximum values, use "min" or "max" (e.g. '--plot-ylim min 10', or '--plot-ylim -1 max').                                    | `None`                               |
 | `--plot_max_norm_depth`| Maximum normalised depth of coverage to use for plotting.                                                             | `None`                               |
 | `--plot_gene_pos`     | When set, add vertical lines to indicate the duplicated gene position on the plot.                                      | `False`                              |
 | `--plot_force`        | Forces plotting regardless of depth of coverage value.                                                                  | `False`                              |
