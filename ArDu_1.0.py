@@ -10,6 +10,7 @@ import time
 # Loading specialised modules 
 import matplotlib
 import matplotlib.pyplot as plt
+#from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
@@ -43,46 +44,42 @@ def add_plot_params_box(fig, args):
         bbox=dict(boxstyle="square",facecolor="white", edgecolor="gray", alpha=0.9)
     )
 
-
-# Functions for slw smoothing
 def window_average(arr: np.ndarray, w: int):
+    """Sliding window average computation."""
     numbers_series = pd.Series(arr)
-    windows = numbers_series.rolling(w, center=True, min_periods=1)  # Use center=True to align the window 
+    windows = numbers_series.rolling(w, center=True, min_periods=1)  # center=True aligns the window 
     moving_averages = windows.median()
     return moving_averages
 
 def window_variance(arr: np.ndarray, w: int):
+    """Sliding window variance computation."""
     numbers_series = pd.Series(arr)
-    windows = numbers_series.rolling(w, center=True, min_periods=1)  # Use center=True to align the window
+    windows = numbers_series.rolling(w, center=True, min_periods=1)  
     moving_variances = windows.var()
     return moving_variances
 
 def calculate_coverage_stats(regions, bam_file, quantile):
-    """Compute mean, median, and standard deviation from depth of coverage for each gene."""
+    """Compute mean, median, and standard deviation from depth of coverage for each locus."""
     data_list = []
     try:
-        total_genes = len(regions)
+        total_locus = len(regions)
         
         with pysam.AlignmentFile(bam_file, "rb") as samfile:
-            for name, region_list in tqdm(regions.items(), total=total_genes, desc="Processing genes"):
+            for name, region_list in tqdm(regions.items(), total=total_locus, desc="Processing targets"):
                 coverage_values = []
 
                 for region in region_list:
                     if not region:
                         continue
-
-                    # Collect all coverage values for the region
-                    for pileupcolumn in samfile.pileup(region=region, min_base_quality=13, min_mapping_quality=20):
+                    for pileupcolumn in samfile.pileup(region=region, min_base_quality=13, min_mapping_quality=20):# collect all coverage values for the region that meet Basq and MQ
                         coverage_values.append(pileupcolumn.n)
                         
-
-                # Remove the smallest coverage values
+                # Remove the smallest coverage values DEPRECATED 
                 #if coverage_values and quantile:
                 #    quantile = np.quantile(coverage_values, args.quantile)
                 #    coverage_values = [val for val in coverage_values if val >= quantile]
-
-                # Compute statistics if we have coverage values
-                if coverage_values:
+                
+                if coverage_values:# Compute statistics if we have coverage values
                     mean_coverage = np.mean(coverage_values)
                     median_coverage = np.median(coverage_values)
                     sd_coverage = np.std(coverage_values, ddof=1) if len(coverage_values) > 1 else 0.0
@@ -90,9 +87,9 @@ def calculate_coverage_stats(regions, bam_file, quantile):
                 else:
                     mean_coverage, median_coverage, sd_coverage, covbases = 'NA', 'NA', 'NA', 'NA'
 
-                # Append results
+                # append values
                 data_list.append({
-                    "gene": name,
+                    "locus": name,
                     "mean": mean_coverage,
                     "median": median_coverage,
                     "sd": sd_coverage,
@@ -105,8 +102,8 @@ def calculate_coverage_stats(regions, bam_file, quantile):
 
     return pd.DataFrame(data_list)
 
-# Function to detect significant shifts between normalised depth and moving average
 def detect_shifts(data: pd.DataFrame, threshold: float, window_size: int, passes: int):
+    """Function to detect significant shifts between normalised depth and moving average."""
     norm_smooth = data['norm'].values.copy()
     moving_average_smooth = data['moving_average'].values.copy()
     
@@ -118,8 +115,8 @@ def detect_shifts(data: pd.DataFrame, threshold: float, window_size: int, passes
     significant_shifts = data[np.abs(diff) > threshold]
     return significant_shifts
 
-# Function to calculate the nucleotide counts and total depth of coverage
 def calculate_nucleotide_counts(bam_file, chromosome, position):
+    """Function to calculate the nucleotide counts and total depth of coverage."""
     position = int(position)  # pos integer check
     samfile = pysam.AlignmentFile(bam_file, "rb")
     counts = {'A': 0, 'T': 0, 'C': 0, 'G': 0}
@@ -134,8 +131,8 @@ def calculate_nucleotide_counts(bam_file, chromosome, position):
     samfile.close()
     return counts, total_depth
 
-# Function to get regions from a bed file
 def get_regions(regions):
+    """Function to get regions from the region target file."""
     regions_dict = {}
     with open(regions, "r") as f:
         for line_str in f:
@@ -151,11 +148,11 @@ def get_regions(regions):
                 regions_dict[line[3]] = [f"{line[0]}:{line[1]}-{line[2]}"]
     return regions_dict
 
-# Function to compute the total span of a candidate gene
-def get_totalspan(regions, gene_name):
-    gene_intervals = []
+def get_totalspan(regions, locus_name):
+    """Function to compute the total span of a candidate locus."""
+    locus_intervals = []
     
-    # Read bed file
+    # read region file 
     with open(regions, 'r') as f:
         for line in f:
             parts = line.strip().split('\t')
@@ -165,32 +162,32 @@ def get_totalspan(regions, gene_name):
             chromosome = parts[0]
             start = int(parts[1])
             end = int(parts[2])
-            gene = parts[3]
+            locus = parts[3]
             
-            # Check if the gene matches the specified gene name
-            if gene == gene_name:
-                gene_intervals.append((start, end, chromosome))
+            # Check if the locus matches the specified locus name
+            if locus == locus_name:
+                locus_intervals.append((start, end, chromosome))
                 chrm = chromosome
     
-    # If gene_intervals gene was not found in the file
-    if not gene_intervals:
+    # if locus_intervals name was not found in the file
+    if not locus_intervals:
         return None
     
     # Calculate the minimum start and max end for the loci intervals
-    min_start = min(interval[0] for interval in gene_intervals)
-    max_end = max(interval[1] for interval in gene_intervals)
+    min_start = min(interval[0] for interval in locus_intervals)
+    max_end = max(interval[1] for interval in locus_intervals)
     
     # Return the interval as tuple format chromosome, min_start, max_end
     totalspan = (chrm, min_start, max_end)
     return totalspan
 
-# Parse tab-delimited file for plot intervals
 def parse_plot_intervals(file_path):
+    """Parse tab-delimited file for plot intervals."""
     plot_intervals = {}
     with open(file_path, 'r') as f:
         for line in f:
-            gene, interval = line.strip().split('\t')
-            plot_intervals[gene] = interval
+            locus, interval = line.strip().split('\t')
+            plot_intervals[locus] = interval
     return plot_intervals
 
 def compute_sliding_covariance(data, window_size):
@@ -216,7 +213,7 @@ def main():
     # Mandatory arguments
     parser = argparse.ArgumentParser(description="ArDu -Architecture of Duplications- Identify duplications structure via depth of coverage analysis.")
     parser.add_argument("-b", "--bam", help="Input a list of BAM files (one per line)")
-    parser.add_argument("-r", "--region", required=True, help="Takes as input a 4 columns file (tab delimited, as bed format: 'chromosome\tstart\tstop\tgene_name') containing regions of \
+    parser.add_argument("-r", "--region", required=True, help="Takes as input a 4 columns file (tab delimited, as bed format: 'chromosome\tstart\tstop\tlocus_name') containing regions of \
                         interest. Features like genes composed of multiple regions (e.g. exons) will be pooled together if they share the same name (in the 4th column)")
     parser.add_argument("-n","--norm", required=True, help="Name of the region to use for normalisation describe in the regions file.")
     parser.add_argument("-o", "--outfile", required=True, help="Prefix for output file names")
@@ -230,66 +227,66 @@ def main():
         default=None, 
         help="Optional: produces a plot of the raw and normalised depth of coverage. Accepts as value the following extensions for the plot file: \
         png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, the putative breakpoints will be plotted.")
-    parser.add_argument("--plot_threshold", 
+    parser.add_argument("--plot-threshold", 
         type=float, 
         default= 1.4, 
-        help="Treshold value to consider a duplication. Default value is 1.4, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a mono-copy and a duplicated copy of a given gene.")
-    parser.add_argument("--plot_interval", 
-        help="A tab delimited file containing specific genomic interval used for plotting, forma: 'gene_name\tchromosome:start-stop'")
-    parser.add_argument("--plot_proportion", 
+        help="Treshold value to consider a duplication. Default value is 1.4, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a mono-copy and a duplicated copy of a given locus.")
+    parser.add_argument("--plot-interval", 
+        help="A tab delimited file containing specific genomic interval used for plotting, forma: 'locus_name\tchromosome:start-stop'")
+    parser.add_argument("--plot-proportion", 
         type=float, 
         default= 2, 
-        help="Set the plotting interval to X time the size of the total gene span. Default = 2.")
-    parser.add_argument("--plot_slw", 
+        help="Set the plotting interval to X time the size of the total locus span. Default = 2.")
+    parser.add_argument("--plot-slw", 
         type=int, 
         default= 1000, 
         help="Sliding window size (pb) used for coverage representation, higher values will result in a smoother depth of coverage representation.")
-    parser.add_argument("--plot_gene_pos",
+    parser.add_argument("--plot-locus-pos",
         action='store_true', 
-        help="When set, add vertical lines to indicate the duplicated gene position on the plot.")
-    parser.add_argument("--plot_force",
+        help="When set, add vertical lines to indicate the duplicated locus position on the plot.")
+    parser.add_argument("--plot-force",
         action='store_true', help="Forces plotting regardless of depth of coverage value.")
-    parser.add_argument("--plot_covar",
+    parser.add_argument("--plot-covar",
         action='store_true',
         help="Plots the covariance between mean depth of coverage and the variance instead of the mean depth of coverage.")
-    parser.add_argument('--plot_ylim',
+    parser.add_argument('--plot-ylim',
         type=float,
         nargs=2,
         help='Set Y-axis limits as two separate numbers (e.g. a b)')
     parser.add_argument(
-        "--plot_doclim",
+        "--plot-doclim",
         type=str,
         nargs=2,
         help="Minimum and maximum normalised depth of coverage to use for plotting and bkp analysis. "
             "Use 'min' or 'max' to refer to the actual min/max of the dataset, e.g. 'min 0.5' or '0.5 max'.")
-    parser.add_argument("--plot_bin",
+    parser.add_argument("--plot-bin",
         type=int,
         help="Bins of X bp are added on top of sliding windows.")
-    parser.add_argument("--plot_dpi",
+    parser.add_argument("--plot-dpi",
         type=int,
         default= 300,
         help="Set the plot dpi, default= 300.")
-    parser.add_argument("--plot_param",
+    parser.add_argument("--plot-param",
         action='store_true',
         help="Prints the parameters on the plot.")
 
     ## Breakpoints detection
-    parser.add_argument("--breakpoint", choices=["ruptures", "rollingaverage"], help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
+    parser.add_argument("-bkp","--breakpoint", choices=["ruptures", "rollingaverage"], help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
                         'ruptures' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --bkp_model, --bkp_pen or --bkp_nb. \n\
                         'rollingaverage' uses successive rolling average to detect shifts in depth of coverage. Associated options are --bkp_slw, --bkp_threshold and --bkp_passes. \n\
                         Setting this argument will create a '.breakpoints.tsv' output file containing the positions found by the rupture package, or the regions of depth of coverage \
                         shifts found with 'rollingaverage'.")
-    parser.add_argument("--bkp_slw", type=int, default=1000, help="Window size for ruptures model and rolling average calculation. Default= 1 kb.")
-    parser.add_argument("--bkp_signal", type=str, help="Signal on which to run ruptures, possibilities are norm for normalised depth of coverage, variance or mean for the per sliding window variance and mean or covar for their covariance. \n\
+    parser.add_argument("--bkp-slw", type=int, default=1000, help="Window size for ruptures model and rolling average calculation. Default= 1 kb.")
+    parser.add_argument("--bkp-signal", type=str, help="Signal on which to run ruptures, possibilities are norm for normalised depth of coverage, variance or mean for the per sliding window variance and mean or covar for their covariance. \n\
                         Default to mean.")
 
-    parser.add_argument("--bkp_nb", type=int, default=2, help="Number of expected breakpoints in this structure, cannot be used alongside --bkp_pen. Default = 2")
-    parser.add_argument("--bkp_pen", type=int, help="Penalty parameter for ruptures algo.predict. A higher value will result in a higher penalty in breakpoint creation.\n\
+    parser.add_argument("--bkp-nb", type=int, default=2, help="Number of expected breakpoints in this structure, cannot be used alongside --bkp_pen. Default = 2")
+    parser.add_argument("--bkp-pen", type=int, help="Penalty parameter for ruptures algo.predict. A higher value will result in a higher penalty in breakpoint creation.\n\
                         use this option if you don't have a prior on the bkp number in the structure you're looking at.")
-    parser.add_argument("--bkp_model", type=str, default="l2", help="Model used by ruptures package. Default ='l2'.")
-    parser.add_argument("--bkp_algo", type=str, default="BottomUp", help="Algorithm used by ruptures package. Default ='BottomUp'.")
-    parser.add_argument("--bkp_threshold", type=float, default=0.5, help="Threshold for detecting shifts in depth of coverage.")
-    parser.add_argument("--bkp_passes", type=int, default=1, help="Number of rolling average passes. Increasing will lessen the overal variation in depth of coverage.")
+    parser.add_argument("--bkp-model", type=str, default="l2", help="Model used by ruptures package. Default ='l2'.")
+    parser.add_argument("--bkp-algo", type=str, default="BottomUp", help="Algorithm used by ruptures package. Default ='BottomUp'.")
+    parser.add_argument("--bkp-threshold", type=float, default=0.5, help="Threshold for detecting shifts in depth of coverage.")
+    parser.add_argument("--bkp-passes", type=int, default=1, help="Number of rolling average passes. Increasing will lessen the overal variation in depth of coverage.")
 
     ## Diagnostic mutation genotyping 
     parser.add_argument("--mutation", help="Optional: if set, this option will return the number of reads supporting each nucleotides at the given position(s) in a .mutation.tsv file. Takes as input a tab-delimited file\
@@ -326,23 +323,23 @@ def main():
             print(f"Processing {bam_name}")
 
             # Compute coverage values
-            gene_coverage_df = calculate_coverage_stats(regions_dict, bam_file, args.quantile)
+            locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file, args.quantile)
 
-            # Check if the normalisation gene is present
-            if args.norm not in gene_coverage_df['gene'].values:
-                print(f"Normalisation gene {args.norm} not found in coverage for {bam_file}. Skipping.")
+            # Check if the normalisation locus is present
+            if args.norm not in locus_coverage_df['locus'].values:
+                print(f"Normalisation locus {args.norm} not found in coverage for {bam_file}. Skipping.")
                 continue
 
-            # median coverage for the normalisation gene
-            ref_median = gene_coverage_df.loc[gene_coverage_df['gene'] == args.norm, 'mean'].values[0]
+            # median coverage for the normalisation locus
+            ref_median = locus_coverage_df.loc[locus_coverage_df['locus'] == args.norm, 'mean'].values[0]
             if not isinstance(ref_median, (int, float)):
                 print(f"The depth of coverage of the reference used for normalisation is invalid in {bam_file}. Skipping.")
                 continue
 
             # Normalisation
-            gene_coverage_df['normalised'] = gene_coverage_df['mean'].apply(lambda x: x / ref_median if isinstance(x, (int, float)) else "NA")
-            gene_coverage_df['bam_file'] = bam_name
-            coverage_dfs.append(gene_coverage_df)
+            locus_coverage_df['normalised'] = locus_coverage_df['mean'].apply(lambda x: x / ref_median if isinstance(x, (int, float)) else "NA")
+            locus_coverage_df['bam_file'] = bam_name
+            coverage_dfs.append(locus_coverage_df)
 
             # -----------------------------
             # Breakpoints and plotting
@@ -350,29 +347,29 @@ def main():
                 continue
             else:
                 if args.plot_force:
-                    filtered_genes_df = gene_coverage_df[gene_coverage_df['gene'] != args.norm]
+                    filtered_locus_df = locus_coverage_df[locus_coverage_df['locus'] != args.norm]
                 else:
-                    filtered_genes_df = gene_coverage_df[gene_coverage_df['normalised'] > args.plot_threshold]
-                # Process filtered gene
-                for idx, row in filtered_genes_df.iterrows():
-                    gene = row['gene']
+                    filtered_locus_df = locus_coverage_df[locus_coverage_df['normalised'] > args.plot_threshold]
+                # Process filtered locus
+                for idx, row in filtered_locus_df.iterrows():
+                    locus = row['locus']
                     mean_coverage = row['mean']
                     sd_coverage = row['sd']
                     normalised_coverage = row['normalised']
                     # depth file creaton
                     if args.plot_interval and args.plot:
                         plot_intervals = parse_plot_intervals(args.plot_interval)
-                        str_incr_span = plot_intervals[gene]
+                        str_incr_span = plot_intervals[locus]
                         samfile = pysam.AlignmentFile(bam_file, "rb")
                         depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span, min_base_quality=13, min_mapping_quality=20)]
                     elif args.plot_proportion and args.plot:
-                        totalspan = get_totalspan(args.region, gene)
+                        totalspan = get_totalspan(args.region, locus)
                         if totalspan is None:
-                            print(f"Warning: No intervals found for gene {gene} in BED file.")
+                            print(f"Warning: No intervals found for locus {locus} in BED file.")
                             continue
                         chromosome, plotStart, plotStop = totalspan
-                        gene_length = plotStop - plotStart
-                        extension = gene_length * args.plot_proportion
+                        locus_length = plotStop - plotStart
+                        extension = locus_length * args.plot_proportion
                         plotStart -= int(extension)
                         plotStop += int(extension)
                         str_incr_span = f"{chromosome}:{plotStart}-{plotStop}"
@@ -415,11 +412,15 @@ def main():
 
                     # Plotting
                     fig, ax = plt.subplots(figsize=(11, 7))
+                    ### modify all x ticks
+                    #formatter = FuncFormatter(lambda x, pos: '' if x < 0 else f'{x / 1e6:.0f} Mb')
+                    #ax.xaxis.set_major_formatter(formatter)
                     if args.plot_ylim:
                         ax.set_ylim(args.plot_ylim)
 
                     ax.grid(axis='y', linestyle='dashdot', linewidth=0.5)
                     ax.tick_params(axis='both', labelsize=12)
+                    plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
                     ax.plot(d.pos, d.norm, label="Normalised Depth of Coverage", color="lightsteelblue", linestyle='none', marker='.')
 
                     if args.plot_covar:
@@ -446,7 +447,7 @@ def main():
                                     bp_pos = int(d.loc[b, 'pos'])
                                     breakpoints_data.append({
                                         'bam_file': bam_name,
-                                        'gene': gene,
+                                        'locus': locus,
                                         'chromosome': str_incr_span.split(':')[0],
                                         'position': bp_pos,
                                         'breakpoint_number': line_num,
@@ -480,12 +481,12 @@ def main():
                                 ax.axvspan(region[0], region[1], color='darkred')
                                 ax.text(region_center, max_norm_depth + 0.1, f"{i+1}", color="darkred", fontsize=10, weight='bold')
 
-                    if args.plot_gene_pos:
-                        totalspan = get_totalspan(args.region, gene)
+                    if args.plot_locus_pos:
+                        totalspan = get_totalspan(args.region, locus)
                         mask = (d.pos >= totalspan[1]) & (d.pos <= totalspan[2])
-                        ax.plot(d.pos[mask], d.moving_average[mask], color="mediumpurple", label=f"{gene}", zorder=5, linewidth=2.5)
+                        ax.plot(d.pos[mask], d.moving_average[mask], color="mediumpurple", label=f"{locus}", zorder=5, linewidth=2.5)
 
-                    fig.suptitle(f"{gene} locus in {bam_name}", fontsize=14, y=1.02)
+                    fig.suptitle(f"{locus} locus in {bam_name}", fontsize=14, y=1.02)
                     ax.set_xlabel(f"Genomic position: {str_incr_span}", fontsize=12)
                     ax.set_ylabel("Normalised Depth of Coverage", fontsize=12)
 
@@ -504,9 +505,9 @@ def main():
                         add_plot_params_box(fig, args)
 
                     plt.tight_layout()
-                    output_dirgene = f"{output_dir}/{gene}-plots/"
-                    os.makedirs(output_dirgene, exist_ok=True)
-                    plt.savefig(os.path.join(output_dirgene, f"{bam_name}_{gene}_plot.{args.plot}"),
+                    output_dirlocus = f"{output_dir}{locus}-plots/"
+                    os.makedirs(output_dirlocus, exist_ok=True)
+                    plt.savefig(os.path.join(output_dirlocus, f"{bam_name}_{locus}_plot.{args.plot}"),
                                 bbox_inches='tight', dpi=args.plot_dpi)
                     plt.close()
 
@@ -525,21 +526,21 @@ def main():
                         if isinstance(row['normalised'], (int, float)) else "NA;NA;NA;NA;NA",
             axis=1
         )
-        # pivot the combined df so each row is a gene and each column apprt from gene is a bam
-        pivot_df = combined_df.pivot(index='gene', columns='bam_file', values='values').reset_index()
-        cols = ['gene'] + [bam for bam in bam_names_without_ext if bam in pivot_df.columns]
+        # pivot the combined df so each row is a locus and each column apprt from name is a bam
+        pivot_df = combined_df.pivot(index='locus', columns='bam_file', values='values').reset_index()
+        cols = ['locus'] + [bam for bam in bam_names_without_ext if bam in pivot_df.columns]
         pivot_df = pivot_df[cols]
         
         # Output file name
-        coverage_output_file = f"{output_dir}/{args.outfile}_coverage.tsv"
+        coverage_output_file = f"{output_dir}{args.outfile}_coverage.tsv"
         
         # Open the file to write the header and data
         with open(coverage_output_file, 'w') as f:
             # Write custom header lines
             f.write("# ArDu coverage outfile\n")
             f.write("# Generated on: " + str(pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')) + "\n")
-            f.write("# Format LOCI  uDoC:sdDoC:medDoC:CovBases:RCN\n")
-            f.write("# uDOC: mean Depth of Coverage over the entire locus span.\n")
+            f.write("# Format Target uDoC:sdDoC:medDoC:CovBases:RCN\n")
+            f.write("# uDOC: mean Depth of Coverage over the entire target span.\n")
             f.write("# sdDOC:standard deviation of mean Depth of Coverage.\n")
             f.write("# medDoC:median Depth of Coverage over the entire locus span.\n")
             f.write("# RCN: relative copy number.\n")
@@ -547,7 +548,7 @@ def main():
             pivot_df.to_csv(f, sep='\t', index=False)
             
 
-        print(f"Coverage data saved to {output_dir}/{coverage_output_file}")
+        print(f"Coverage data saved to {coverage_output_file}")
     else:
         print("No coverage data to write.")
 
@@ -556,9 +557,9 @@ def main():
     # Combines the breakpoints df into a single one and write to out 
     if breakpoints_data:
         bp_df = pd.DataFrame(breakpoints_data)
-        breakpoints_output_file = f"{output_dir}/{args.outfile}_breakpoints.tsv"
+        breakpoints_output_file = f"{output_dir}{args.outfile}_breakpoints.tsv"
         bp_df.to_csv(breakpoints_output_file, sep='\t', index=False)
-        print(f"Breakpoints data saved to {output_dir}/{breakpoints_output_file}")
+        print(f"Breakpoints data saved to {breakpoints_output_file}")
 
 
 
@@ -592,7 +593,7 @@ def main():
                             'G': 'NA',
                             'depth': 'NA'
                         }
-        mutation_output_file = f"{output_dir}/{args.outfile}_mutations.tsv"
+        mutation_output_file = f"{output_dir}{args.outfile}_mutations.tsv"
         with open(mutation_output_file, 'w') as out_file:
             out_file.write("mutation_id\t" + "\t".join(bam_files) + "\n")
             for mutation_id, bam_counts in mutation_data.items():
@@ -605,7 +606,7 @@ def main():
                         count_str = "A=NA;T=NA;C=NA;G=NA;depth=NA"
                     row.append(count_str)
                 out_file.write("\t".join(row) + "\n")
-        print(f"Mutation data saved to {output_dir}/{mutation_output_file}")
+        print(f"Mutation data saved to {mutation_output_file}")
 
     elapsed_time = round(time.time() - start_time, 1)
     print(f"Elapsed time: {elapsed_time} seconds")
