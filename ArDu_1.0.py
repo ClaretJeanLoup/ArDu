@@ -164,7 +164,6 @@ def get_totalspan(regions, locus_name):
             end = int(parts[2])
             locus = parts[3]
             
-            # Check if the locus matches the specified locus name
             if locus == locus_name:
                 locus_intervals.append((start, end, chromosome))
                 chrm = chromosome
@@ -173,7 +172,7 @@ def get_totalspan(regions, locus_name):
     if not locus_intervals:
         return None
     
-    # Calculate the minimum start and max end for the loci intervals
+    # Calculate th start and max end for the loci intervals
     min_start = min(interval[0] for interval in locus_intervals)
     max_end = max(interval[1] for interval in locus_intervals)
     
@@ -212,14 +211,23 @@ def compute_sliding_covariance(data, window_size):
 def main():
     # Mandatory arguments
     parser = argparse.ArgumentParser(description="ArDu -Architecture of Duplications- Identify duplications structure via depth of coverage analysis.")
-    parser.add_argument("-b", "--bam", help="Input a list of BAM files (one per line)")
-    parser.add_argument("-r", "--region", required=True, help="Takes as input a 4 columns file (tab delimited, as bed format: 'chromosome\tstart\tstop\tlocus_name') containing regions of \
-                        interest. Features like genes composed of multiple regions (e.g. exons) will be pooled together if they share the same name (in the 4th column)")
-    parser.add_argument("-n","--norm", required=True, help="Name of the region to use for normalisation describe in the regions file.")
-    parser.add_argument("-o", "--outfile", required=True, help="Prefix for output file names")
+    parser.add_argument("-b", "--bam", 
+    help="Input a list of BAM files (one per line)")
+    parser.add_argument("-r", "--region", 
+    required=True, 
+    help="Takes as input a 4 columns file (tab delimited, as bed format: 'chromosome\tstart\tstop\tlocus_name') containing regions of \
+    interest. Features like genes composed of multiple regions (e.g. exons) will be pooled together if they share the same name (in the 4th column)")
+    parser.add_argument("-n","--norm", 
+    required=True, 
+    help="Name of the region to use for normalisation describe in the regions file.")
+    parser.add_argument("-o", "--outfile", 
+    required=True, 
+    help="Prefix for output file names")
 
     #Optional arguments
-    parser.add_argument("-q","--quantile", type=float, help="Set the quantile of depth of coverage that is excluded from all analyses.DEPRECATED") #deprecated
+    parser.add_argument("-q","--quantile", 
+    type=float, 
+    help="Set the quantile of depth of coverage that is excluded from all analyses.DEPRECATED") #deprecated
 
     ## Plotting
     parser.add_argument("--plot", 
@@ -271,37 +279,66 @@ def main():
         help="Prints the parameters on the plot.")
 
     ## Breakpoints detection
-    parser.add_argument("-bkp","--breakpoint", choices=["ruptures", "rollingaverage"], help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
-                        'ruptures' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --bkp_model, --bkp_pen or --bkp_nb. \n\
-                        'rollingaverage' uses successive rolling average to detect shifts in depth of coverage. Associated options are --bkp_slw, --bkp_threshold and --bkp_passes. \n\
-                        Setting this argument will create a '.breakpoints.tsv' output file containing the positions found by the rupture package, or the regions of depth of coverage \
-                        shifts found with 'rollingaverage'.")
-    parser.add_argument("--bkp-slw", type=int, default=1000, help="Window size for ruptures model and rolling average calculation. Default= 1 kb.")
-    parser.add_argument("--bkp-signal", type=str, help="Signal on which to run ruptures, possibilities are norm for normalised depth of coverage, variance or mean for the per sliding window variance and mean or covar for their covariance. \n\
-                        Default to mean.")
+    parser.add_argument("-bkp","--breakpoint", 
+    choices=["ruptures", "rollingaverage"], 
+    help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
+    'ruptures' uses the ruptures python package (see https://centre-borelli.github.io/ruptures-docs/). Associated options are --bkp-model, --bkp-pen or --bkp-nb. \n\
+    'rollingaverage' uses successive rolling average to detect shifts in depth of coverage. \n\
+    Associated options are --bkp-slw, --bkp-threshold and --bkp-passes. \n\
+    Setting this argument will create a '.breakpoints.tsv' output file containing the positions found by the rupture package, or the regions of depth of coverage \
+    shifts found with 'rollingaverage'.")
+    parser.add_argument("--bkp-slw", 
+    type=int, 
+    default=1000, 
+    help="Window size for ruptures model and rolling average calculation. Default= 1 kb.")
+    parser.add_argument("--bkp-signal", 
+    type=str, 
+    help="Signal on which to run ruptures, possibilities are norm for normalised depth of coverage, variance or mean for the per sliding window variance and \
+    mean or covar for their covariance. \n\
+    Default to mean.")
 
-    parser.add_argument("--bkp-nb", type=int, default=2, help="Number of expected breakpoints in this structure, cannot be used alongside --bkp_pen. Default = 2")
-    parser.add_argument("--bkp-pen", type=int, help="Penalty parameter for ruptures algo.predict. A higher value will result in a higher penalty in breakpoint creation.\n\
-                        use this option if you don't have a prior on the bkp number in the structure you're looking at.")
-    parser.add_argument("--bkp-model", type=str, default="l2", help="Model used by ruptures package. Default ='l2'.")
-    parser.add_argument("--bkp-algo", type=str, default="BottomUp", help="Algorithm used by ruptures package. Default ='BottomUp'.")
-    parser.add_argument("--bkp-threshold", type=float, default=0.5, help="Threshold for detecting shifts in depth of coverage.")
-    parser.add_argument("--bkp-passes", type=int, default=1, help="Number of rolling average passes. Increasing will lessen the overal variation in depth of coverage.")
+    parser.add_argument("--bkp-nb", 
+    type=int, 
+    default=2, 
+    help="Number of expected breakpoints in this structure, can't be used alongside --bkp-pen. Default = 2")
+    parser.add_argument("--bkp-pen", 
+    type=int, 
+    help="Penalty parameter for ruptures algo.predict. A higher value will result in a higher penalty in breakpoint creation.\n\
+    Use this option if you don't have a prior on the bkp number in the structure you're looking at.")
+    parser.add_argument("--bkp-model", 
+    type=str, 
+    default="l2", 
+    help="Model used by ruptures package. Default ='l2'.")
+    parser.add_argument("--bkp-algo", 
+    type=str, 
+    default="BottomUp", 
+    help="Algorithm used by ruptures package. Default ='BottomUp'.")
+    parser.add_argument("--bkp-threshold", 
+    type=float, 
+    default=0.5, 
+    help="Threshold for detecting shifts in depth of coverage.")
+    parser.add_argument("--bkp-passes", 
+    type=int, 
+    default=1, 
+    help="Number of rolling average passes. Increasing will lessen the overal variation in depth of coverage.")
 
     ## Diagnostic mutation genotyping 
-    parser.add_argument("--mutation", help="Optional: if set, this option will return the number of reads supporting each nucleotides at the given position(s) in a .mutation.tsv file. Takes as input a tab-delimited file\
-                         with the following columns: chromosome, position and an optional third column containing the name of the muations you're screening for (tab-delimited).")
+    parser.add_argument("--mutation", 
+    help="Returns the number of reads supporting each nucleotides at the given position(s) in a .mutation.tsv file. Takes as input a tab-delimited file\
+     with the following columns: chromosome, position and an optional third column containing the name of the muations you're screening for (tab-delimited).")
 
     args = parser.parse_args()
 
-    start_time = time.time()  # Start
+
+# START
+    start_time = time.time()  
     date_str = time.strftime("%Y-%m-%d")
     ArDuBase = os.path.splitext(os.path.basename(args.bam))[0]
     ArDuBaseRun = f"{ArDuBase}-{date_str}"
     output_dir = f"ArDuRun-{ArDuBaseRun}/"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Check if the provided bam is a valid file path
+    # check if the bamlist is a valid file path
     with open(args.bam, 'r') as f:
         bam_files = f.read().splitlines()
 
@@ -466,7 +503,7 @@ def main():
                             if consecutive_positions:
                                 regions.append((consecutive_positions[0], consecutive_positions[-1]))
 
-                    # Draw breakpoints
+                    # breakpoints
                     if args.breakpoint == "ruptures":
                         for i, b in enumerate(result[:-1]):
                             ax.axvline(d.loc[b]["pos"], color="darkred", linestyle="-", linewidth=1.5)
@@ -514,8 +551,6 @@ def main():
         except Exception as e:
             print(f"{bam_file}: {e}")
 
-    # -----------------------------
-    # Combine the bam dataf and write the final tsv file
 
     if coverage_dfs:
         # Concat
@@ -531,20 +566,18 @@ def main():
         cols = ['locus'] + [bam for bam in bam_names_without_ext if bam in pivot_df.columns]
         pivot_df = pivot_df[cols]
         
-        # Output file name
         coverage_output_file = f"{output_dir}{args.outfile}_coverage.tsv"
         
-        # Open the file to write the header and data
         with open(coverage_output_file, 'w') as f:
-            # Write custom header lines
+            # custom header lines
             f.write("# ArDu coverage outfile\n")
             f.write("# Generated on: " + str(pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')) + "\n")
             f.write("# Format Target uDoC:sdDoC:medDoC:CovBases:RCN\n")
             f.write("# uDOC: mean Depth of Coverage over the entire target span.\n")
-            f.write("# sdDOC:standard deviation of mean Depth of Coverage.\n")
-            f.write("# medDoC:median Depth of Coverage over the entire locus span.\n")
+            f.write("# sdDOC: standard deviation of mean Depth of Coverage.\n")
+            f.write("# medDoC: median Depth of Coverage over the entire locus span.\n")
+            f.write("# CovBases: total number of covered bases on loci span.\n")
             f.write("# RCN: relative copy number.\n")
-            # Write the actual data from the DataFrame
             pivot_df.to_csv(f, sep='\t', index=False)
             
 
