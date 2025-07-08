@@ -15,7 +15,10 @@ cd ArDu
 conda env create -f ArDu_environment.yml
 ```
 3- Check if the environment was successfully created, it should appear under `ardu`.<br>
-```conda env list```<br>
+```
+conda env list
+```
+
 4- Activate the environment and run the script
 ```
 conda activate ardu
