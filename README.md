@@ -34,7 +34,7 @@ cd ~/
 ```
 Run part 1 and 2 of the installation process above, then run the following commands.
 ```
-echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'~/conda_env/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
+echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'~/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
 ```
 Source your .bashrc file. 
 ```
