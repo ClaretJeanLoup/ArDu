@@ -34,11 +34,9 @@ Navigate to your home directory and run part 1 and 2 of the installation process
 cd ~/
 git clone https://github.com/ClaretJeanLoup/ArDu.git
 cd ArDu
-```
-```
 conda env create -f ArDu_environment.yml
 ```
-Add the following lines to your `.bashrc` file. 
+Use the following command to add ArDu alisases to your `.bashrc` file. 
 ```
 echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'python ~/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
 ```
