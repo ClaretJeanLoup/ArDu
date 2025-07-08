@@ -25,9 +25,10 @@ conda activate ardu
 python /path/to/ardu/ArDu_version.py #replace path to match yours
 ```
 Given that all dependencies are satistfied, ArDu can be used like any other python script.
-
+<br>
+<br>
 ### Special note for Uppmax users. 
-For my Uppmax folks, here's how to properly set up ArDu:
+For my Uppmax folks, here's how to properly set up ArDu:<br>
 Navigate to your home directory and run part 1 and 2 of the installation process.
 ```
 cd ~/
@@ -54,7 +55,8 @@ ArDu can then be run with the following command
 > pip install missing_package
  ```
 *Now go out there and hunt some duplications!* 
-
+<br>
+<br>
 ## Debugging
 Here are some basic errors that you could encounter and how to fix them:
 ```
@@ -71,14 +73,14 @@ Error processing BAM file TestRun.bam: invalid literal for int() with base 10: '
 ```
 --> Invalid line in the -r target file. Most likely the file contains a header that should be removed. Next version of ArDu will skip those lines. 
 
-
-
+<br>
+<br>
 ## Gene Copy Number Estimates, word of caution and best practises 
 
 ArDu uses information from BAM alignment files to estimate a target loci copy number. The target's depth of coverage is normalised by a user-provided reference loci. Depending on the reference used, this normalised depth can be directly used a a copy number proxy (Claret et al. 2023). 
 The choice of reference used for normalisation is critical to the quality of the copy number estimate. A wide range of genomic intervals can be used as reference, from whole chromosomes to a single housekeeping gene. However, we have seen an improvement in estimation precision by using exonic sequences of a housekeeping gene. WIP: An upcoming version will allow a less crude normalisation method through the use of targeted interval normalisation.
 There are many copy number variant annotation tools that work on a genome-wide scale, but ArDu is specifically designed around a candidate locus approach, while you can use it on a large number of targets or even the entirety of an assembly annotation, it is not its intended use (expect long run times and little usability in the results).
-
+<br>
 ## Options 
 
 | Argument               | Description                                                                                                            | Default                     |
