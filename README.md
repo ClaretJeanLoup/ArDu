@@ -43,10 +43,11 @@ source ~/.bashrc
 Your ArDu environment can now be loaded with the command `mlardu`.
 ArDu can then be run with the following command
 ```ardu```
->⚠️ Heads up: For reasons beyond my current Conda skills, a few packages might not get installed from the .yml file. If that happens, just activate the environment and install them manually with pip.> ```
+>⚠️ Heads up: For reasons beyond my current Conda skills, a few packages might not get installed from the .yml file. If that happens, just activate the environment and install them manually with pip.
+ ```
 > mlardu
 > pip install missing_package
-> ```
+ ```
 *Now go out there and hunt some duplications!* 
 
 ## Debugging
