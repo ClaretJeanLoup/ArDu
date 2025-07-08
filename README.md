@@ -29,7 +29,7 @@ Navigate to your home directory.
 ```
 cd ~/
 ```
-Run part 1 of the installation process above, then run the following commands.
+Run part 1 and 2 of the installation process above, then run the following commands.
 ```
 echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'~/conda_env/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
 ```
@@ -40,7 +40,11 @@ source ~/.bashrc
 Your ArDu environment can now be loaded with the command `mlardu`.
 ArDu can then be run with the following command
 ```ardu```
-
+> ⚠️ **:** For some reasons that I'm way too inexperienced to explain, some packages do not install despite being in the .yml file. To fix this, simply load the environment and install them manually with pip.
+> ```
+> mlardu
+> pip install missing_package
+> ```
 *Now go out there and hunt some duplications!* 
 
 ## Debugging
