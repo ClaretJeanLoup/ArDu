@@ -28,11 +28,16 @@ Given that all dependencies are satistfied, ArDu can be used like any other pyth
 
 ### Special note for Uppmax users. 
 For my Uppmax folks, here's how to properly set up ArDu:
-Navigate to your home directory.
+Navigate to your home directory and run part 1 and 2 of the installation process.
 ```
 cd ~/
+git clone https://github.com/ClaretJeanLoup/ArDu.git
+cd ArDu
 ```
-Run part 1 and 2 of the installation process above, then run the following commands.
+```
+conda env create -f ArDu_environment.yml
+```
+Add the following lines to your `.bashrc` file. 
 ```
 echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'python ~/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
 ```
