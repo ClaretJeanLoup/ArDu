@@ -1,5 +1,5 @@
 # Introducing Ar(chitecture of)Du(plications)
-**Please bear with me as this readme -like ArDu- is still a Work In Progress**
+🛠️**Please bear with me as this readme -like ArDu- is still a Work In Progress**🛠️
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
 
