@@ -3,8 +3,42 @@
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
 
-## Installation and debugging. 
-Simply download the main ArDu script and install it's dependencies. They are all listed in the `ArDu_environment.yml` file. Given that all dependencies are satistfied, ArDu can be used like any other python script. Here are some basic errors that you could encounter and how to fix them:
+## Installation. 
+Here's a quick step by step guide on how to install ArDu:
+1- Clone the github repository and create the environment with the `.yml` file. 
+```
+git clone https://github.com/ClaretJeanLoup/ArDu.git
+cd ArDu
+conda env create -f environment.yml
+```
+2- Check if the environment was successfully created, it should appear under `ardu`.
+```conda env list```
+3- Activate the environment and run the script
+```
+conda activate ardu
+python /path/to/ardu/ArDu_version.py #replace path to match yours
+```
+Given that all dependencies are satistfied, ArDu can be used like any other python script.
+
+### Special note for Uppmax users. 
+For my Uppmax folks, here's how to properly set up ArDu:
+Run part 1 of the installation process above, then add the following lines to your `~/bashrc` file.
+```
+mlardu() {
+    ml bioinfo-tools
+    conda deactivate
+    conda activate ardu
+    ml python/3.9.5/ pysam
+}
+```
+Source your .bashrc file `source ~/.bashrc`. ArDu environment can now be loaded with the command `mlardu`.
+ArDu can then be run: `python path/to/ardu/ArDu_version.py`. For ease of use, you can also create a second alias in your .bashrc.
+`alias ardu='python3 /path/to/ardu/ArDu_version.py'`
+
+Now go out there and hunt some duplications! 
+
+## Debugging
+Here are some basic errors that you could encounter and how to fix them:
 ```
 Processing TestRun
 Processing genes:   0%|                                   | 0/2 [00:00<?, ?it/s]
