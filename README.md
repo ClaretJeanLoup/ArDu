@@ -120,7 +120,7 @@ python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
 ### Example run with plotting and breakpoints:
 ```
 python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
---plot png --plot_threshold 1.4 --breakpoint ruptures --bkp_model l2 --bkp_pen 10 
+--plot png --plot-threshold 1.4 --breakpoint ruptures --bkp-model l2 --bkp-pen 10 
 ```
 
 ## Output files
