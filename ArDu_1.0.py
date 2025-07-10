@@ -10,7 +10,6 @@ import time
 # Loading specialised modules 
 import matplotlib
 import matplotlib.pyplot as plt
-#from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
@@ -73,11 +72,6 @@ def calculate_coverage_stats(regions, bam_file, quantile):
                         continue
                     for pileupcolumn in samfile.pileup(region=region, min_base_quality=13, min_mapping_quality=20):# collect all coverage values for the region that meet Basq and MQ
                         coverage_values.append(pileupcolumn.n)
-                        
-                # Remove the smallest coverage values DEPRECATED 
-                #if coverage_values and quantile:
-                #    quantile = np.quantile(coverage_values, args.quantile)
-                #    coverage_values = [val for val in coverage_values if val >= quantile]
                 
                 if coverage_values:# Compute statistics if we have coverage values
                     mean_coverage = np.mean(coverage_values)
@@ -249,9 +243,9 @@ def main():
         type=int, 
         default= 1000, 
         help="Sliding window size (pb) used for coverage representation, higher values will result in a smoother depth of coverage representation.")
-    parser.add_argument("--plot-locus-pos",
+    parser.add_argument("--plot-target",
         action='store_true', 
-        help="When set, add vertical lines to indicate the duplicated locus position on the plot.")
+        help="When set, highlight in colour the target's position on the plot.")
     parser.add_argument("--plot-force",
         action='store_true', help="Forces plotting regardless of depth of coverage value.")
     parser.add_argument("--plot-covar",
