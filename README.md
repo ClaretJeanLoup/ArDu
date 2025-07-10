@@ -96,7 +96,7 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | `--plot-slw`          | Sliding window size (bp) used for coverage representation, higher values result in a smoother depth of coverage.      | `1000`                               |
 | `--plot-ylim`| Set Y-axis limits, format as two space separated numbers (e.g. `--plot-ylim -1 10`).                                    | `None`                               |
 | `--plot-doclim`| Minimum and maximum normalised depth of coverage to use for plotting **and** breakpoint analysis (e.g. `--plot-doclim 0.5 5`). To keep minimum or maximum values, use "min" or "max" (e.g. `--plot-doclim min 5`, or `--plot-doclim 0.5 max`).              | `None`                               |
-| `--plot-gene-pos`     | Shows target loci position on the plot.                                      | `False`                              |
+| `--plot-target`     | Highlight in colour the target's position on the plot..                                      | `False`                              |
 | `--plot-force`        | Forces plotting regardless of depth of coverage value.                                                                  | `False`                              |
 | `--plot-covar`        | Plots the covariance between mean depth of coverage and the variance instead of the mean depth of coverage.            | `False`                              |
 | **Breakpoints Detection**  |
