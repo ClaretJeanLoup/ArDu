@@ -10,6 +10,7 @@ import time
 # Loading specialised modules 
 import matplotlib
 import matplotlib.pyplot as plt
+#from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
@@ -72,6 +73,11 @@ def calculate_coverage_stats(regions, bam_file, quantile):
                         continue
                     for pileupcolumn in samfile.pileup(region=region, min_base_quality=13, min_mapping_quality=20):# collect all coverage values for the region that meet Basq and MQ
                         coverage_values.append(pileupcolumn.n)
+                        
+                # Remove the smallest coverage values DEPRECATED 
+                #if coverage_values and quantile:
+                #    quantile = np.quantile(coverage_values, args.quantile)
+                #    coverage_values = [val for val in coverage_values if val >= quantile]
                 
                 if coverage_values:# Compute statistics if we have coverage values
                     mean_coverage = np.mean(coverage_values)
@@ -273,6 +279,7 @@ def main():
         help="Prints the parameters on the plot.")
 
     ## Breakpoints detection
+    group = parser.add_argument_group('Custom Section Title')
     parser.add_argument("-bkp","--breakpoint", 
     choices=["ruptures", "rollingaverage"], 
     help="Optional: assess putative breakpoints. Two methods are available: 'ruptures' and 'rollingaverage'. \n\
@@ -512,7 +519,7 @@ def main():
                                 ax.axvspan(region[0], region[1], color='darkred')
                                 ax.text(region_center, max_norm_depth + 0.1, f"{i+1}", color="darkred", fontsize=10, weight='bold')
 
-                    if args.plot_locus_pos:
+                    if args.plot_target:
                         totalspan = get_totalspan(args.region, locus)
                         mask = (d.pos >= totalspan[1]) & (d.pos <= totalspan[2])
                         ax.plot(d.pos[mask], d.moving_average[mask], color="mediumpurple", label=f"{locus}", zorder=5, linewidth=2.5)
