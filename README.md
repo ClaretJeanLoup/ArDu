@@ -90,9 +90,17 @@ There are many copy number variant annotation tools that work on a genome-wide s
 | `-o, --outfile`       | Prefix for output file names.                                                                                          |                      |
 | **Plotting Arguments**|
 | `--plot`              | Optional: produces a plot of the raw and normalised depth of coverage. Accepts the following extensions: png, jpeg, jpg, pdf, svg, eps. If used jointly with --breakpoint, putative breakpoints will be plotted. | `None`                               |
-| `--plot-threshold`    | Threshold value to consider a duplication. Default value is 1.5, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a single-copy and a duplicated copy of a given gene. | `1.5`                                |
-| `--plot-interval`     | A tab-delimited file containing specific genomic intervals used for plotting, format: <br>`gene_name\tchromosome:start-stop`. | `None`                               |
+| `--plot-threshold`    | Threshold value to consider a duplication. Default value is 1.5, i.e. the expected normalised coverage of a heterozygous diploid organism possessing a single-copy and a duplicated copy of a given gene. | `1.5` |
+| `--plot-interval`     | A tab-delimited file containing specific genomic intervals used for plotting, format: <br>`gene_name\tchromosome:start-stop`. | `None`                                                             |
 | `--plot-proportion`   | Set the plotting interval to X times the size of the total gene span. Default = 2.                                      | `2`                                  |
+| `--plot-auto`   | Automatically expand plot interval by probing coverage. A set number of probes are sent on each side of the target loci and their coverage is compared to the target's. Probes are sent further and further until a noticeable drop in depth of coverage is detected.                                       |
+|`--probe-ratio`|Coverage ratio of probes to target to consider a drop.|`0.8`|
+| `--probe-size`          | Probe length (bp).      | `1000`                               |
+|`--probe-number`| Number of probes per round of interval extension.|`20`|
+|`--probe-spacing`|Distance between probe starts (bp).|`1000`|
+|`--probe-drops`|Number of consecutive low probes to stop extension.|`10`|
+|`--probe-use-median`|Use median depth of coverage of the probes instead of mean. Can be usefull in especially noisy regions.||
+|`--max-extension`|Maximum interval extension on each sides of the target's.|`5000000`|
 | `--plot-slw`          | Sliding window size (bp) used for coverage representation, higher values result in a smoother depth of coverage.      | `1000`                               |
 | `--plot-ylim`| Set Y-axis limits, format as two space separated numbers (e.g. `--plot-ylim -1 10`).                                    | `None`                               |
 | `--plot-doclim`| Minimum and maximum normalised depth of coverage to use for plotting **and** breakpoint analysis (e.g. `--plot-doclim 0.5 5`). To keep minimum or maximum values, use "min" or "max" (e.g. `--plot-doclim min 5`, or `--plot-doclim 0.5 max`).              | `None`                               |
