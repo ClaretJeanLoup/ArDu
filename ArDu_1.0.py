@@ -18,6 +18,36 @@ import pysam
 import ruptures as rpt
 from tqdm import tqdm
 
+def format_row(row):
+    """
+    Safely formats a row of coverage statistics for output.
+    Converts mean, sd, median, normalised to numbers if possible,
+    otherwise returns 'NA'.
+    """
+    try:
+        mean = round(float(row['mean']), 2)
+    except (ValueError, TypeError):
+        mean = 'NA'
+    try:
+        sd = round(float(row['sd']), 2)
+    except (ValueError, TypeError):
+        sd = 'NA'
+    try:
+        median = round(float(row['median']), 2)
+    except (ValueError, TypeError):
+        median = 'NA'
+    try:
+        covered = int(row['coveredbases']) if row['coveredbases'] != 'NA' else 'NA'
+    except (ValueError, TypeError):
+        covered = 'NA'
+    try:
+        norm = round(float(row['normalised']), 1)
+    except (ValueError, TypeError):
+        norm = 'NA'
+    return f"{mean};{sd};{median};{covered};{norm}"
+
+
+
 def add_plot_params_box(fig, args):
     """Add a summary of plot parameters outside the plotting area."""
     lines = []
@@ -43,6 +73,36 @@ def add_plot_params_box(fig, args):
         va='top', ha='left',
         bbox=dict(boxstyle="square",facecolor="white", edgecolor="gray", alpha=0.9)
     )
+
+def detect_softclip_counts(bam_file, region, min_clip=5):
+    """
+    Count clipped reads per position across a region.
+
+    Returns a DataFrame with [position, softclip_count].
+    """
+    softclip_counts = {}
+    chrom = region.split(":")[0]
+
+    with pysam.AlignmentFile(bam_file, "rb") as samfile:
+        for read in samfile.fetch(region=region):
+            if read.cigartuples is None:
+                continue
+
+            # left softclip
+            if read.cigartuples[0][0] == 4 and read.cigartuples[0][1] >= min_clip:
+                pos = read.reference_start
+                softclip_counts[pos] = softclip_counts.get(pos, 0) + 1
+
+            # right softclip
+            if read.cigartuples[-1][0] == 4 and read.cigartuples[-1][1] >= min_clip:
+                pos = read.reference_end
+                softclip_counts[pos] = softclip_counts.get(pos, 0) + 1
+
+    return pd.DataFrame(
+        [{"chromosome": chrom, "position": pos, "softclip_count": count}
+         for pos, count in softclip_counts.items()]
+    ).sort_values("position")
+
 
 def window_average(arr: np.ndarray, w: int):
     """Sliding window average computation."""
@@ -189,6 +249,168 @@ def parse_plot_intervals(file_path):
             plot_intervals[locus] = interval
     return plot_intervals
 
+import numpy as np
+import pysam
+
+def region_median(coverage, start, end):
+    """Compute median coverage in [start, end) from a coverage dict."""
+    vals = [coverage[pos] for pos in range(start, end) if pos in coverage]
+    return np.median(vals) if vals else 0
+
+def expand_interval(bam_file, chrom, start, end,
+                    target_cov,
+                    reference_cov,
+                    probe_size=100,
+                    probe_spacing=None,
+                    probe_number=20,
+                    stop_drops=7,
+                    max_extension=None,
+                    verbose=True,
+                    drop_threshold=5,
+                    null_threshold=3,
+                    min_extension_factor=2):
+    """
+    Expand duplication interval using spaced probes with symmetric extension.
+
+    Rules:
+    - Gradual expansion if >= drop_threshold probes fall below reference_cov.
+    - Force a 2× target interval expansion on each side if >= null_threshold probes have zero coverage.
+    - Enforce symmetric extension at the end.
+    - Apply min_extension_factor and optional max_extension.
+    """
+
+    if probe_spacing is None:
+        probe_spacing = probe_size
+    if reference_cov is None:
+        raise ValueError("reference_cov must be provided for probe filtering.")
+
+    samfile = pysam.AlignmentFile(bam_file, "rb")
+
+    left = start
+    right = end
+    original_left, original_right = start, end
+
+    rounds = 0
+    reason = None
+    last_left_drops = 0
+    last_right_drops = 0
+
+    while True:
+        rounds += 1
+        new_left = max(0, left - probe_number * probe_spacing)
+        new_right = right + probe_number * probe_spacing
+
+        # enforce max extension
+        if max_extension is not None:
+            new_left = max(original_left - max_extension, new_left)
+            new_right = min(original_right + max_extension, new_right)
+
+        # fetch coverage
+        region = f"{chrom}:{new_left}-{new_right}"
+        coverage = {p.pos: p.n for p in samfile.pileup(
+            region=region,
+            min_base_quality=13,
+            min_mapping_quality=20
+        )}
+
+        # spaced probes
+        left_probes = [(left - (i + 1) * probe_spacing,
+                        left - (i + 1) * probe_spacing + probe_size)
+                       for i in range(probe_number)]
+        right_probes = [(right + i * probe_spacing,
+                         right + i * probe_spacing + probe_size)
+                        for i in range(probe_number)]
+
+        # probe coverage
+        def probe_cov(s, e):
+            cov = region_median(coverage, s, e)
+            return cov
+
+        left_covs = [probe_cov(s, e) for s, e in left_probes]
+        right_covs = [probe_cov(s, e) for s, e in right_probes]
+
+        # classify probes
+        left_drops = sum(c < reference_cov and c > 0 for c in left_covs)
+        right_drops = sum(c < reference_cov and c > 0 for c in right_covs)
+        left_nulls = sum(c == 0 for c in left_covs)
+        right_nulls = sum(c == 0 for c in right_covs)
+
+        # stopping condition
+        last_left_drops = sum(c < target_cov for c in left_covs[-stop_drops:])
+        last_right_drops = sum(c < target_cov for c in right_covs[-stop_drops:])
+
+        stop_left = last_left_drops == stop_drops
+        stop_right = last_right_drops == stop_drops
+
+        # expansion rules
+        expand_left = expand_right = False
+
+        # Case 1: normal coverage decay
+        if left_drops >= drop_threshold:
+            expand_left = True
+        if right_drops >= drop_threshold:
+            expand_right = True
+
+        # Case 2: coverage deserts → big jump
+        if left_nulls >= null_threshold:
+            expand_left = True
+            left = max(0, left - 2 * (original_right - original_left))
+        if right_nulls >= null_threshold:
+            expand_right = True
+            right = right + 2 * (original_right - original_left)
+
+        # Apply expansions
+        if expand_left and not (left_nulls >= null_threshold):
+            left = new_left
+        if expand_right and not (right_nulls >= null_threshold):
+            right = new_right
+
+        # exit conditions
+        if stop_left and stop_right:
+            reason = "coverage_drop"
+            break
+        if left == new_left and right == new_right:
+            reason = "max_extension" if max_extension else "no_further_expansion"
+            break
+
+    samfile.close()
+
+    # symmetric extension
+    extended_left = original_left - left
+    extended_right = right - original_right
+    max_ext = max(extended_left, extended_right)
+    left = original_left - max_ext
+    right = original_right + max_ext
+
+    # enforce max extension
+    if max_extension is not None:
+        left = max(original_left - max_extension, left)
+        right = min(original_right + max_extension, right)
+
+    # enforce minimum extension
+    min_extension = (original_right - original_left) * min_extension_factor
+    if (right - left) < min_extension:
+        mid = (original_left + original_right) // 2
+        half = min_extension // 2
+        left = mid - half
+        right = mid + half
+        if max_extension is not None:
+            left = max(original_left - max_extension, left)
+            right = min(original_right + max_extension, right)
+
+    if verbose:
+        print(f"[expand_interval] {chrom}:{original_left}-{original_right} "
+              f"→ {chrom}:{left}-{right} | "
+              f"Rounds={rounds}, "
+              f"Extended L={original_left - left}bp, R={right - original_right}bp | "
+              f"Last round drops: L={last_left_drops}, R={last_right_drops} "
+              f"(threshold={stop_drops}) | Drops: L={left_drops}, R={right_drops}, "
+              f"Nulls: L={left_nulls}, R={right_nulls} | "
+              f"Stopped by={reason or 'forced_jump'} | Symmetric mode ON")
+
+    return f"{chrom}:{left}-{right}"
+
+
 def compute_sliding_covariance(data, window_size):
     """Compute covariance of mean depth and variance in a sliding window."""
     mean_series = data['depth'].rolling(window_size, center=True).mean()
@@ -245,6 +467,29 @@ def main():
         type=float, 
         default= 2, 
         help="Set the plotting interval to X time the size of the total locus span. Default = 2.")
+    parser.add_argument("--plot-auto", 
+        action="store_true",
+        help="Automatically expand plot interval by probing coverage")
+    parser.add_argument("--probe-size", 
+        type=int, default=1000,
+        help="Probe window size (bp)")
+    parser.add_argument("--max-extension", type=int, default=5000000,
+        help="Maximum interval extension on each sides of the target's. Default to 5 Mb.")
+    parser.add_argument("--probe-threshold",
+        type=float, default=0.8,
+        help="Coverage ratio of probes to target. Default to 0.8.")
+    parser.add_argument("--probe-number", 
+        type=int, default=20,
+        help="Number of probes per round of interval extension. Default to 20.")
+    parser.add_argument("--probe-spacing", 
+        type=int, default=1000,
+        help="Distance between probe starts (bp). Default 1kb.")
+    parser.add_argument("--probe-drops",
+        type=int, default=10,
+        help="Stop after this many consecutive low probes. Default to 10.")
+    parser.add_argument("--probe-use-median",
+        action="store_true",
+        help="Use median coverage instead of mean")
     parser.add_argument("--plot-slw", 
         type=int, 
         default= 1000, 
@@ -369,13 +614,13 @@ def main():
                 continue
 
             # median coverage for the normalisation locus
-            ref_median = locus_coverage_df.loc[locus_coverage_df['locus'] == args.norm, 'mean'].values[0]
+            ref_median = locus_coverage_df.loc[locus_coverage_df['locus'] == args.norm, 'median'].values[0]
             if not isinstance(ref_median, (int, float)):
                 print(f"The depth of coverage of the reference used for normalisation is invalid in {bam_file}. Skipping.")
                 continue
 
             # Normalisation
-            locus_coverage_df['normalised'] = locus_coverage_df['mean'].apply(lambda x: x / ref_median if isinstance(x, (int, float)) else "NA")
+            locus_coverage_df['normalised'] = locus_coverage_df['median'].apply(lambda x: x / ref_median if isinstance(x, (int, float)) else "NA")
             locus_coverage_df['bam_file'] = bam_name
             coverage_dfs.append(locus_coverage_df)
 
@@ -384,35 +629,114 @@ def main():
             if not args.plot:
                 continue
             else:
+                for col in ['mean', 'sd', 'normalised']:
+                    locus_coverage_df[col] = pd.to_numeric(locus_coverage_df[col], errors='coerce')
+
+                # filterout rows with NA 
+                na_rows = locus_coverage_df[locus_coverage_df[['mean', 'sd', 'normalised']].isna().any(axis=1)]
+                if not na_rows.empty:
+                    print("Warning: skipping rows with missing values:")
+                    for locus_name in na_rows['locus']:
+                        print(f" - {locus_name}")
+                    locus_coverage_df = locus_coverage_df.dropna(subset=['mean', 'sd', 'normalised']).reset_index(drop=True)
+
                 if args.plot_force:
                     filtered_locus_df = locus_coverage_df[locus_coverage_df['locus'] != args.norm]
                 else:
                     filtered_locus_df = locus_coverage_df[locus_coverage_df['normalised'] > args.plot_threshold]
+                
                 # Process filtered locus
                 for idx, row in filtered_locus_df.iterrows():
                     locus = row['locus']
                     mean_coverage = row['mean']
                     sd_coverage = row['sd']
                     normalised_coverage = row['normalised']
-                    # depth file creaton
+                    
+                    
                     if args.plot_interval and args.plot:
                         plot_intervals = parse_plot_intervals(args.plot_interval)
                         str_incr_span = plot_intervals[locus]
                         samfile = pysam.AlignmentFile(bam_file, "rb")
                         depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span, min_base_quality=13, min_mapping_quality=20)]
+
+                    elif args.plot_auto:
+                        totalspan = get_totalspan(args.region, locus)
+                        if totalspan is None:
+                            continue
+
+                        chrom, dup_start, dup_end = totalspan
+
+                        # Open BAM once
+                        with pysam.AlignmentFile(bam_file, "rb") as samfile:
+                            # Validate chromosome
+                            chrom_lengths = dict(zip(samfile.references, samfile.lengths))
+                            chrom_len = chrom_lengths.get(chrom)
+                            if chrom_len is None:
+                                print(f"Warning: chromosome {chrom} not found in BAM header, skipping.")
+                                continue
+
+                            # Clamp interval
+                            if dup_start >= dup_end:
+                                print(f"Warning: invalid interval {chrom}:{dup_start}-{dup_end}, skipping.")
+                                continue
+                            dup_start = max(0, dup_start)
+                            dup_end = min(chrom_len, dup_end)
+
+                            str_incr_span = expand_interval(
+                                bam_file,
+                                chrom,
+                                dup_start,
+                                dup_end,
+                                target_cov=mean_coverage,
+                                reference_cov=ref_median,
+                                probe_size=args.probe_size,
+                                probe_spacing=args.probe_spacing,
+                                probe_number=args.probe_number,
+                                stop_drops=args.probe_drops,
+                                max_extension=args.max_extension
+                            )
+
+                            # Fetch depth data
+                            depth_data = [
+                                (p.pos, p.n) for p in samfile.pileup(
+                                    region=str_incr_span,
+                                    min_base_quality=13,
+                                    min_mapping_quality=20
+                                )
+                            ]
+
                     elif args.plot_proportion and args.plot:
                         totalspan = get_totalspan(args.region, locus)
                         if totalspan is None:
                             print(f"Warning: No intervals found for locus {locus} in BED file.")
                             continue
+
                         chromosome, plotStart, plotStop = totalspan
                         locus_length = plotStop - plotStart
                         extension = locus_length * args.plot_proportion
-                        plotStart -= int(extension)
-                        plotStop += int(extension)
+
+                        # get chromosome length
+                        with pysam.AlignmentFile(bam_file, "rb") as samfile:
+                            chrom_lengths = dict(zip(samfile.references, samfile.lengths))
+                        chrom_len = chrom_lengths.get(chromosome, None)
+
+                        try:
+                            plotStop = min(chrom_len, plotStop + int(extension))
+                            plotStart = max(1, plotStart - int(extension))
+                        except (ValueError, TypeError):
+                            print(f"Warning: invalid extension value {extension} for locus {locus}. Skipping.")
+                            continue
+
                         str_incr_span = f"{chromosome}:{plotStart}-{plotStop}"
-                        samfile = pysam.AlignmentFile(bam_file, "rb")
-                        depth_data = [(p.pos, p.n) for p in samfile.pileup(region=str_incr_span, min_base_quality=13, min_mapping_quality=20)] #stepper='all'
+                        with pysam.AlignmentFile(bam_file, "rb") as samfile:
+                            depth_data = [
+                                (p.pos, p.n) for p in samfile.pileup(
+                                    region=str_incr_span,
+                                    min_base_quality=13,
+                                    min_mapping_quality=20
+                                )
+                            ]
+
                     else:
                         continue
 
@@ -440,13 +764,22 @@ def main():
                     d["moving_average"] = window_average(d["norm"].to_numpy(), args.plot_slw)
                     d["moving_variances"] = window_variance(d["norm"].to_numpy(), args.plot_slw)
                     d['pos'], d['covariance'] = compute_sliding_covariance(d, args.plot_slw)
-                    
-                    if args.plot_bin: # Bin the df
+
+                    if args.plot_bin and not d.empty:
                         bin_size = args.plot_bin
-                        bin_edges = np.arange(d['pos'].min(), d['pos'].max() + bin_size, bin_size)
-                        d['genomic_bins'] = pd.cut(d['pos'], bins=bin_edges, include_lowest=True)
-                        for col in ['pos', 'moving_average', 'moving_variances', 'covariance']:
-                            d[col] = d.groupby('genomic_bins', observed=True)[col].transform('mean')
+                        region_span = d['pos'].max() - d['pos'].min()
+                        # nly bin if the bin size is smaller than the region span
+                        if bin_size < region_span:
+                            bin_edges = np.arange(d['pos'].min(), d['pos'].max() + bin_size, bin_size)
+                            if len(bin_edges) > 1:  # need at least 2 bins
+                                d['genomic_bins'] = pd.cut(d['pos'], bins=bin_edges, include_lowest=True)
+                                for col in ['pos', 'moving_average', 'moving_variances', 'covariance']:
+                                    d[col] = d.groupby('genomic_bins', observed=True)[col].transform('mean')
+                            else:
+                                print("Tant pis, rentrons")
+                        else:
+                            print(f"Skipping binning for locus {locus}: bin size {bin_size} >= region span {region_span}.")
+
 
                     # Plotting
                     fig, ax = plt.subplots(figsize=(11, 7))
@@ -482,7 +815,11 @@ def main():
                             result = algo.predict(pen=args.bkp_pen) if args.bkp_pen else algo.predict(n_bkps=args.bkp_nb)
                             if result:
                                 for line_num, b in enumerate(result[:-1], start=1):
-                                    bp_pos = int(d.loc[b, 'pos'])
+                                    try:
+                                        bp_pos = int(d.loc[b, 'pos'])
+                                    except (ValueError, TypeError):
+                                        print(f"Warning: invalid position at row {b}, skipping.")
+                                        continue
                                     breakpoints_data.append({
                                         'bam_file': bam_name,
                                         'locus': locus,
@@ -557,11 +894,8 @@ def main():
         # Concat
         combined_df = pd.concat(coverage_dfs, ignore_index=True)
         # formats the values 
-        combined_df['values'] = combined_df.apply(
-            lambda row: f"{round(row['mean'], 2)};{round(row['sd'], 2)};{round(row['median'], 2)};{row['coveredbases']};{round(row['normalised'], 1)}" 
-                        if isinstance(row['normalised'], (int, float)) else "NA;NA;NA;NA;NA",
-            axis=1
-        )
+        combined_df['values'] = combined_df.apply(format_row, axis=1)
+        
         # pivot the combined df so each row is a locus and each column apprt from name is a bam
         pivot_df = combined_df.pivot(index='locus', columns='bam_file', values='values').reset_index()
         cols = ['locus'] + [bam for bam in bam_names_without_ext if bam in pivot_df.columns]
