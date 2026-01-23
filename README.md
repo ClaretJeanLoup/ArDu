@@ -38,7 +38,7 @@ conda env create -f ArDu_environment.yml
 ```
 Use the following command to add ArDu alisases to your `.bashrc` file. 
 ```
-echo -e '\n# Load ArDu environment\nmlardu() {\n    ml bioinfo-tools\n    conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'python ~/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
+echo -e '\n# Load ArDu environment\nmlardu() {\n   conda deactivate\n    conda activate ardu\n    ml python/3.9.5/ pysam\n}\n# ArDu script alias\nalias ardu='"'"'python ~/ArDu/ArDu_1.0.py'"'"'' >> ~/.bashrc
 ```
 Source your .bashrc file. 
 ```
@@ -48,10 +48,14 @@ Your ArDu environment can now be loaded with the command `mlardu`.
 ArDu can then be run with the following command
 ```ardu```
 >⚠️ Heads up: For reasons beyond my current Conda skills, a few packages might not get installed from the .yml file. If that happens, just activate the environment and install them manually with pip.
- ```
-> mlardu
-> pip install missing_package
- ```
+<br>
+
+#### Milesi's lab addendum 
+As of January 2026, an ArDu module has been implemented for the members of the compute project. Simply add the ArDu module location to your $MODULEPATH and you're good to go:
+```
+export MODULEPATH=/crex/proj/snic2020-6-185/modules:$MODULEPATH
+```
+>⚠️ You'll need to run this line each time you connect to the cluster or launch a job via sbatch or interactive session. If you find this annoying, simply add the line to you home's .bashrc file. I also recommend throwing in an alias for the ArDu python script such as the one shown above. 
 *Now go out there and hunt some duplications!* 
 <br>
 <br>
