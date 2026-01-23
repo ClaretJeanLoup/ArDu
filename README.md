@@ -55,7 +55,9 @@ As of January 2026, an ArDu module has been implemented for the members of the c
 ```
 export MODULEPATH=/crex/proj/snic2020-6-185/modules:$MODULEPATH
 ```
->⚠️ You'll need to run this line each time you connect to the cluster or launch a job via sbatch or interactive session. If you find this annoying, simply add the line to you home's .bashrc file. I also recommend throwing in an alias for the ArDu python script such as the one shown above. 
+Now, ArDu can be loaded as any module on Pelle: `module load ardu_shared`. 
+
+>⚠️ You'll need to run the export command line each time you connect to the cluster or launch a job via sbatch or interactive session. If you find this annoying, simply add the line to you home's .bashrc file. I also recommend throwing in an alias for the ArDu python script such as the one shown above. 
 *Now go out there and hunt some duplications!* 
 <br>
 <br>
