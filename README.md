@@ -1,7 +1,7 @@
 # Introducing Ar(chitecture of)Du(plications)
-🛠️**Please bear with me as this readme -like ArDu- is still a Work In Progress**🛠️
+**Please bear with me as this readme -like ArDu- is still a Work In Progress**
 
-ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should run on pretty much any machine and it should be modular and easy to modify to accommodate the users specific needs. 
+ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should be modular and easy enough to modify to accommodate the users specific needs. 
 
 ## Installation. 
 Here's a quick step by step guide on how to install ArDu: <br>
@@ -149,6 +149,44 @@ If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either t
 
 ### _output_prefix_ _mutation.tsv
 If --mutation is set, ArDu will output a _mutation.tsv file containign all nucleotides and total depth for the given position, format A=;T=;C=;G=;total_depth=. 
+
+## JunctionFinder
+We developped a simple module to check for the existence of junction sequences (i.e. sequences overlapping the breakpoints of duplications events) in short reads. It uses the .bkps.tsv file generqted by ArDu's main script as input, alongside the targets bam file. After detecting softcliped sequences around each putative breakpoints, aligned and unmapped reads stored in the targets bamfile are screened for sequences containing softclips originating from opposing breakpoints using an Aho-Corasick automaton. This allows to extract potential junction sequences overlapping the structural variants breakpoints.  
+
+Breakpoints + BAM files
+          │
+          ▼
+Extract soft-clipped reads
+          │
+          ▼
+Soft-clip FASTA + metadata TSV
+          │
+          ├── Optional: BLAST alignment
+          │        │
+          │        ▼
+          │   Filter hits near breakpoints
+          │
+          ▼
+Build soft-clip automaton
+          │
+          ▼
+Scan reads for multiple clips
+          │
+          ▼
+Junction reads 
+
+| Argument            | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| `-b --bam_list`     | File listing BAM paths                          |
+| `-i --input`        | Breakpoint file from ArDu main script                                 |
+| `-o --output`       | Output prefix                                   |
+| `-s --size`         | Minimum soft-clip length (default: 30)          |
+| `-e --extension`    | Region around breakpoint (default: 30 bp)       |
+| `--blast`           | Reference genome for BLAST                      |
+| `--pairs`           | Allowed breakpoints                     |
+| `--junction`        | Enable junction read detection                  |
+| `--junction-region` | Restrict junction search region (chr:start-end) |
+
 
 ## Reference
 If you use ArDu, please cite:
