@@ -3,6 +3,58 @@
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should be modular and easy enough to modify to accommodate the users specific needs. 
 
+
+## Quick start 
+### Example run with mandatory options:
+```bash
+python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
+```
+
+### Example run with plotting and breakpoints estimation:
+```bash
+python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
+--plot png --plot-threshold 1.4 --breakpoint ruptures --bkp-model l2 --bkp-pen 10 
+```
+
+## Output files
+### _output_prefix_ coverage.tsv
+The `coverage.tsv` file produced by ArDu stores multiple summary statistics per sample in a single semicolon-separated field :
+| Flag        | Description |
+|-------------|---------|
+| `uDOC`    | Mean depth of coverage | 
+| `sdDOC`   | Standard deviation |
+| `medDOC`  | Median depth of coverage    |
+| `CovBases`| Number of covered bases  | 
+| `RCN`     | Relative copy number (normalised) 
+
+To facilitate downstream analyses, a parser script is provided to extract specific fields into a clean tab-delimited file.
+
+#### Usage
+
+Extract selected fields from a coverage.tsv file:
+```bash
+python ArDu_Parser.py \
+  -i output_prefix.coverage.tsv \
+  -o parsed_output.tsv \
+  --uDOC --RCN
+```
+At least one field flag must be provided (--uDOC, --sdDOC, --medDOC, --CovBases, --RCN). Missing or malformed entries are converted to NA.
+The output is a wide-format matrix:
+
+First column: locus
+Each additional column corresponds to a sample-field combination:
+sample1_uDOC   sample1_RCN   sample2_uDOC   sample2_RCN   ...
+
+### Plots
+If --plot and either --plot-interval or --plot-proportion are set, a graphic representation of the duplicated loci will be produced in the requested format (png, jpeg, jpg, pdf, svg, eps). Target loci position can be plotted with --plot-. If used conjointly with --breakpoint, the predicted breakpoints will be plotted and numbered in the same order as outputed in the _breakpoint.tsv file. 
+
+### _output_prefix_ _breakpoints.tsv
+If --breakpoint is set, ArDu will output a _breakpoints.tsv, containing either the predicted breakpoints position if ruptures was picked, numbered in the same order as the plot, or the genomic regions in which a signification depth of coverage shift was registered if rollingaverage was chosen. 
+
+### _output_prefix_ _mutation.tsv
+If --mutation is set, ArDu will output a _mutation.tsv file containign all nucleotides and total depth for the given position, format A=;T=;C=;G=;total_depth=. 
+
+
 ## Installation. 
 Here's a quick step by step guide on how to install ArDu: <br>
 1- Clone the github repository and create the environment with the `.yml` file. 
