@@ -198,17 +198,23 @@ TArDu is specifically designed around a candidate locus approach, while you can 
 | `--mutation`             | Counts nucleotide support at given positions from BAM files. Input format: `chromosome position mutation_name(optional)`. Outputs `.mutation.tsv`.                                                                                                                                                                        | `None`     |
 
 
-## Command line examples
-### Example run with bare minimum options:
+## Example run
+### _Anopheles gambiae_ ace-1 gene duplication in Ivory Coast natural population:
+The ace-1 locus is known to be involved in insecticide resistance linked to a gene duplication in Anopheles gambiae mosquitoes. Using a bam file of a wild-caught sample from Yopougon (Ivory Coast) we identified a large duplication spanning 203 Kb overlapping the ace-1 loci and 9 other embarked genes. 
+We ran ArDu as follows:
+```bash
+ardu -b bamlist.txt -n reference -r ace1.bed -o AgambR --plot png --plot-interval ace1plot.bed --plot-slw 2500 --plot-bin 500 --plot-target --plot-doclim 0.5 20 --plot-ylim 0 10 --plot-param --breakpoint ruptures 
+Processing Yop16-60
+Processing targets: 100%|█████████████████████████| 2/2 [00:00<00:00, 40.18it/s]
+Breakpoint method: ruptures
+Coverage data saved to ArDuRun-AgambR-2026-05-22/AgambR_coverage.tsv
+Breakpoints data saved to ArDuRun-AgambR-2026-05-22/AgambR_breakpoints.tsv
+Elapsed time: 5.8 seconds 
 ```
-python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix
-```
-
-### Example run with plotting and breakpoints:
-```
-python ardu.py -b bamlist.txt -r regions.txt -n Reference -o output_prefix \
---plot png --plot-threshold 1.4 --breakpoint ruptures --bkp-model l2 --bkp-pen 10 
-```
+#### Graphical output with putative breakpoints identified through _ruptures_ 
+<p align="center">
+  <img src="ArDuRun-AgambR-2026-05-22/ace-1-plots/Yop16-60_ace-1_plot.png" width="700">
+</p>
 
 ## Output files
 ### _output_prefix_ _coverage.tsv
