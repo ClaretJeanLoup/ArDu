@@ -70,7 +70,7 @@ If --mutation is set, ArDu will output a _mutation.tsv file containign all nucle
 
 
 ## Installation. 
-Here's a quick step by step guide on how to install ArDu: <br>
+Step by step guide on how to install ArDu: <br>
 1- Clone the github repository and create the environment with the `.yml` file. 
 ```
 git clone https://github.com/ClaretJeanLoup/ArDu.git
@@ -134,8 +134,8 @@ python /crex/proj/snic2020-6-185/software/envs/ardu_shared/ArDu_1.0.py/
 >⚠️ You'll need to run the full source command line each time you connect to the cluster or launch a job via sbatch or interactive session. 
 *Now go out there and hunt some duplications!* 
 <br>
-<br>
-## Debugging
+
+# Debugging
 Here are some basic errors that you could encounter and how to fix them:
 ```
 Processing TestRun
@@ -248,16 +248,16 @@ Scan reads for multiple clips
           ▼
 Junction reads 
 
-| Argument            | Description                                     |
-| ------------------- | ----------------------------------------------- |
-| `-b --bam_list`     | File listing BAM paths                          |
-| `-i --input`        | Breakpoint file from ArDu main script                                 |
-| `-o --output`       | Output prefix                                   |
-| `-s --size`         | Minimum soft-clip length (default: 30)          |
-| `-e --extension`    | Region around breakpoint (default: 30 bp)       |
-| `--blast`           | Reference genome for BLAST                      |
-| `--pairs`           | Allowed breakpoints                     |
-| `--junction`        | Enable junction read detection                  |
+| Argument| Description|
+| ---- | ------ |
+| `-b --bam_list`| File listing BAM paths|
+| `-i --input`| Breakpoint file from ArDu main script |
+| `-o --output`| Output prefix|
+| `-s --size`| Minimum soft-clip length (default: 30)|
+| `-e --extension`| Region around breakpoint (default: 30 bp)       |
+| `--blast`| Reference genome for BLAST|
+| `--pairs`| Allowed breakpoints|
+| `--junction`| Enable junction read detection|
 | `--junction-region` | Restrict junction search region (chr:start-end) |
 
 
