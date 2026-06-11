@@ -15,6 +15,7 @@ ArDu is now distributed as a proper Python package with four subcommands:
 ## Table of contents
 
 - [Quick start](#quick-start)
+- [Example run](#example-run----anopheles-gambiae-ace-1-duplication)
 - [Installation](#installation)
 - [ardu coverage](#ardu-coverage)
 - [ardu softclips](#ardu-softclips)
@@ -50,13 +51,61 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
   -o JunctionTest
 ```
 
+## Example run — *Anopheles gambiae* ace-1 duplication
+
+The ace-1 locus is known to be involved in insecticide resistance linked to a gene duplication in *Anopheles gambiae* mosquitoes. Using a wild-caught sample from Yopougon (Ivory Coast) we identified a large tandem duplication spanning ~203 kb overlapping the ace-1 locus and 9 other genes.
+
+### Step 1 — Coverage analysis and breakpoint detection
+
+```bash
+ardu coverage -b bamlist.txt -n reference -r ace1.bed -o ArduExampleRun \
+  --plot png --plot-interval ace1plot.bed --plot-slw 2500 --plot-bin 500 \
+  --plot-target --plot-doclim 0.5 20 --plot-ylim 0 10 --plot-param \
+  --breakpoint ruptures
+```
+
+The normalised depth of coverage rises from ~1.5 to ~3 at breakpoint 1 (AgamP4_2R:3,437,186) and drops back at breakpoint 2 (AgamP4_2R:3,639,686), consistent with a heterozygous tandem duplication. The two predicted breakpoints are numbered in the same order as the `_breakpoints.tsv` output.
+
+<p align="center">
+  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/ace-1-plots/Yop16-60_ace-1_plot.png" width="800">
+</p>
+
+### Step 2 — Junction evidence
+
+```bash
+ardu junctions -b bamlist.txt \
+  -i ArDuRun-ArduExampleRun-2026-06-11/ArduExampleRun_breakpoints.tsv \
+  -s 30 -e 1000 --pairs 1-2 --spanning-reads \
+  --blast AgambiaeP4_Genome.fna --plot-insert --plot-softclip \
+  -o JunctionTest
+```
+
+The softclip pileup confirms both breakpoints at base-pair resolution. The mode of soft-clipped reads at breakpoint 1 falls at position 3,436,927 (259 bp upstream of the coverage-based prediction) and at 3,640,306 for breakpoint 2 (620 bp downstream). Spanning reads containing softclip sequences from both breakpoints were recovered and written to `Yop16-60_1-2_junction_reads.fasta`.
+
+<p align="center">
+  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/junctions/JunctionTest_Yop16-60_softclip_dist.png" width="800">
+</p>
+
+The insert-size distribution confirms the expected ~203 kb insert for bridging read pairs spanning the two breakpoints.
+
+<p align="center">
+  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/junctions/JunctionTest_Yop16-60_insert_dist.png" width="400">
+</p>
+
+---
+
 ## Installation
 
 ### From GitHub (recommended):
 ```bash
 git clone https://github.com/ClaretJeanLoup/ArDu.git
-cd ArDu/Development/ardu
+cd ArDu
 pip install -e .
+```
+
+Or directly without cloning:
+```bash
+pip install git+https://github.com/ClaretJeanLoup/ArDu.git
 ```
 
 This installs all dependencies automatically and registers the `ardu` command.
