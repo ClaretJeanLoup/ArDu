@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ardu"
+version = "2.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pysam>=0.22",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "ruptures>=1.1",
+    "tqdm>=4.66",
+    "pyahocorasick>=2.0",
+    "scikit-learn>=1.4",
+]
+
+[project.scripts]
+ardu = "ardu.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
