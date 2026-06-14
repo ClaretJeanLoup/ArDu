@@ -146,7 +146,13 @@ def render_per_sample_plot(
             n_bkps=args.bkp_nb,
             pen=args.bkp_pen,
         )
-        result = bkps  # non-empty list → truthy
+        result = bkps
+
+        x_range = d.pos.max() - d.pos.min()
+        y_positions = []
+        base_y = 1.4
+        jitter_step = 0.15
+
         for entry in bkps:
             b = entry["row_index"]
             line_num = entry["breakpoint_number"]
@@ -166,8 +172,15 @@ def render_per_sample_plot(
                 }
             )
             ax.axvline(bp_pos, color="darkred", linestyle="-", linewidth=1.5)
+
+            y = base_y
+            for prev_pos, prev_y in y_positions:
+                if abs(bp_pos - prev_pos) < x_range * 0.05:
+                    y = prev_y + jitter_step
+            y_positions.append((bp_pos, y))
+
             ax.text(
-                bp_pos, d.loc[b, "norm"], str(line_num),
+                bp_pos, y, f"{line_num}:{bp_pos}",
                 color="darkred", fontsize=10, weight="bold", va="bottom",
             )
 
@@ -331,6 +344,8 @@ def make_pooled_plot(
     if getattr(args, "breakpoint", None) == "ruptures" and sample_list:
         signal_col = args.bkp_signal if args.bkp_signal else "moving_average"
         span_str = sample_list[0][2]
+        ref_d = sample_list[0][1]
+        x_range = ref_d.pos.max() - ref_d.pos.min()
 
         _ref_pos, bkp_list = run_ruptures_multivariate(
             sample_list,
@@ -340,15 +355,26 @@ def make_pooled_plot(
             n_bkps=args.bkp_nb,
             pen=args.bkp_pen,
         )
-        bkp_result = bkp_list  # non-empty → truthy in legend logic
+        bkp_result = bkp_list
+
+        y_positions = []
+        base_y = 1.4
+        jitter_step = 0.15
 
         for entry in bkp_list:
             bp_pos = entry["position"]
             line_num = entry["breakpoint_number"]
             ax.axvline(bp_pos, color="darkred", linestyle="--", linewidth=1.5)
+
+            y = base_y
+            for prev_pos, prev_y in y_positions:
+                if abs(bp_pos - prev_pos) < x_range * 0.05:
+                    y = prev_y + jitter_step
+            y_positions.append((bp_pos, y))
+
             ax.text(
-                bp_pos, ax.get_ylim()[1] * 0.95, str(line_num),
-                color="darkred", fontsize=10, weight="bold", va="top",
+                bp_pos, y, f"{line_num}:{bp_pos}",
+                color="darkred", fontsize=10, weight="bold", va="bottom",
             )
             if breakpoints_data is not None:
                 breakpoints_data.append(
