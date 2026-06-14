@@ -269,11 +269,24 @@ def _extract_softclips(
 # Plot helpers
 # ---------------------------------------------------------------------------
 
-def _plot_insert_sizes(inserts_by_pair: dict, output_path: str) -> None:
+def _plot_insert_sizes(
+    inserts_by_pair: dict,
+    output_path: str,
+    bkp_to_expected_pos: dict | None = None,
+    library_insert: int = 500,
+) -> None:
+    """Plot insert-size distributions per breakpoint pair.
+
+    When *bkp_to_expected_pos* is provided, the expected bridging insert size
+    is computed from the distance between the two breakpoints.  Inserts beyond
+    (duplication_size + library_insert + 10% of duplication_size) are treated
+    as likely misalignments: they are excluded from the plot but counted and
+    reported in the panel title.  A vertical line marks the expected insert.
+    """
     num = max(1, len(inserts_by_pair))
-    cols = math.ceil(math.sqrt(num))
+    cols = min(num, 3)
     rows = math.ceil(num / cols)
-    fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 3 * rows))
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
     axes = np.array(axes).reshape(-1)
 
     for ax, pair_key in zip(axes, inserts_by_pair):
@@ -281,17 +294,65 @@ def _plot_insert_sizes(inserts_by_pair: dict, output_path: str) -> None:
         if not data:
             ax.axis("off")
             continue
-        ax.hist(data, bins=min(100, max(10, int(np.sqrt(len(data))))), edgecolor="black")
+
+        # Compute expected insert and plausibility cap from breakpoint positions
+        expected_insert = None
+        max_plausible = None
+        if bkp_to_expected_pos and len(pair_key) == 2:
+            b1, b2 = pair_key
+            pos1 = bkp_to_expected_pos.get(b1)
+            pos2 = bkp_to_expected_pos.get(b2)
+            if pos1 and pos2:
+                dup_size = abs(pos2 - pos1)
+                tolerance = dup_size * 0.10
+                expected_insert = dup_size + library_insert
+                max_plausible = expected_insert + tolerance
+
+        # Split data into plausible and outliers
+        if max_plausible is not None:
+            plausible = [x for x in data if x <= max_plausible]
+            outliers = [x for x in data if x > max_plausible]
+        else:
+            plausible = data
+            outliers = []
+
+        if not plausible:
+            ax.axis("off")
+            continue
+
+        ax.hist(
+            plausible,
+            bins=min(100, max(10, int(np.sqrt(len(plausible))))),
+            edgecolor="black",
+            color="steelblue",
+            label=f"n={len(plausible)}",
+        )
         ax.set_yscale("log")
-        ax.set_title("-".join(map(str, pair_key)))
-        ax.set_xlabel("Insert size")
-        ax.set_ylabel("Count (log)")
+
+        if expected_insert is not None:
+            ax.axvline(
+                expected_insert, color="red", linestyle="--", linewidth=1.5,
+                label=f"expected: {expected_insert:,.0f} bp",
+            )
+
+        pair_label = "-".join(map(str, pair_key))
+        title = f"Pair {pair_label}"
+        if outliers:
+            title += f" ({len(outliers)} outliers excluded)"
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel("Insert size (bp)", fontsize=9)
+        ax.set_ylabel("Count (log)", fontsize=9)
+        ax.xaxis.set_major_formatter(
+            matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}")
+        )
+        ax.tick_params(axis="x", labelrotation=30, labelsize=8)
+        ax.legend(fontsize=8)
 
     for ax in axes[len(inserts_by_pair):]:
         ax.axis("off")
 
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved {output_path}")
 
@@ -410,16 +471,10 @@ def _plot_softclip_positions(
 
 def run(args) -> None:
     """Entry point for ``ardu junctions``."""
-    ardu_run_dir = os.path.dirname(os.path.abspath(args.input))
-    junctions_dir = os.path.join(ardu_run_dir, "junctions")
-    os.makedirs(junctions_dir, exist_ok=True)
-
-    prefix = os.path.join(junctions_dir, os.path.basename(args.output))
-
-    fasta_output = f"{prefix}_soft_clipped_sequences.fasta"
-    tsv_output = f"{prefix}.tsv"
-    blast_output = f"{prefix}_BLAST_results.txt"
-    bridges_output = f"{prefix}_bridging_pairs.tsv"
+    fasta_output = f"{args.output}_soft_clipped_sequences.fasta"
+    tsv_output = f"{args.output}.tsv"
+    blast_output = f"{args.output}_BLAST_results.txt"
+    bridges_output = f"{args.output}_bridging_pairs.tsv"
 
     for path in (fasta_output, tsv_output):
         if os.path.exists(path):
@@ -445,7 +500,27 @@ def run(args) -> None:
             if base.endswith(".bam"):
                 bam_mapping[base] = full
 
-    breakpoints_df = pd.read_csv(args.input, sep="\t")
+    # Accept either a direct path to a breakpoints TSV or an ArDuRun directory
+    import glob as _glob
+    if os.path.isdir(args.input):
+        candidates = _glob.glob(os.path.join(args.input, "*_breakpoints.tsv"))
+        if len(candidates) == 0:
+            raise FileNotFoundError(
+                f"No *_breakpoints.tsv found in {args.input}. "
+                "Run 'ardu coverage' with --breakpoint first."
+            )
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Multiple breakpoints files found in {args.input}:\n"
+                + "\n".join(candidates)
+                + "\nPlease specify one directly with -i."
+            )
+        breakpoints_path = candidates[0]
+        print(f"Using breakpoints file: {breakpoints_path}")
+    else:
+        breakpoints_path = args.input
+
+    breakpoints_df = pd.read_csv(breakpoints_path, sep="\t")
     breakpoints_df["bam_file"] = breakpoints_df["bam_file"].apply(
         lambda x: os.path.basename(x) + ".bam"
     )
@@ -564,7 +639,7 @@ def run(args) -> None:
                     seen_keys.add(key)
                     matches.append(m)
 
-            output_dir = junctions_dir
+            output_dir = os.path.dirname(args.output) or "."
             if getattr(args, "junction_fastq", False):
                 write_junction_reads_fastq(bam_file, matches, output_dir, bam_name)
             else:
@@ -579,12 +654,16 @@ def run(args) -> None:
                 }
             else:
                 inserts_by_pair = {(bkp,): ins for bkp, ins in inserts_by_bkp.items()}
-            _plot_insert_sizes(inserts_by_pair, f"{prefix}_{bam_name}_insert_dist.png")
+            _plot_insert_sizes(
+                inserts_by_pair,
+                f"{args.output}_{bam_name}_insert_dist.png",
+                bkp_to_expected_pos=bkp_to_expected_pos,
+            )
 
         if args.plot_softclip and args.plot_mode in ("per-bam", "both"):
             _plot_softclip_positions(
                 softclip_positions_by_bkp, bkp_to_expected_pos,
-                f"{prefix}_{bam_name}_softclip_dist.png",
+                f"{args.output}_{bam_name}_softclip_dist.png",
                 bam_name=bam_name,
             )
 
@@ -594,7 +673,7 @@ def run(args) -> None:
     if args.blast:
         print("\n=== RUNNING BLAST ON ALL SOFTCLIPS ===")
         _run_blast(fasta_output, args.blast, blast_output)
-        filtered_output = f"{prefix}_BLAST_filtered_pairs.txt"
+        filtered_output = f"{args.output}_BLAST_filtered_pairs.txt"
         _filter_blast_hits(blast_output, breakpoints_df, args.extension,
                            filtered_output, allowed_pairs)
 
@@ -606,13 +685,14 @@ def run(args) -> None:
             print("Plotting pooled insert-size distributions by pair...")
             _plot_insert_sizes(
                 pooled_inserts_by_pair,
-                f"{prefix}_pooled_insert_dist_by_pair.png",
+                f"{args.output}_pooled_insert_dist_by_pair.png",
+                bkp_to_expected_pos=bkp_to_expected_pos,
             )
         if args.plot_softclip and pooled_softclip_by_pair:
             print("Plotting pooled softclip distributions by pair...")
             _plot_softclip_positions(
                 pooled_softclip_by_pair, bkp_to_expected_pos,
-                f"{prefix}_pooled_softclip_dist_by_pair.png",
+                f"{args.output}_pooled_softclip_dist_by_pair.png",
                 bam_name="pooled",
                 pair_keys=list(pooled_softclip_by_pair.keys()),
             )

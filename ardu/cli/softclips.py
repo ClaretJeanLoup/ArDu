@@ -59,8 +59,7 @@ def register(subparsers) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Helpers (previously module-level in ArDu_softclips.py)
-# ---------------------------------------------------------------------------
+
 
 def _extract_breakpoint_from_qseqid(qseqid: str) -> int | None:
     match = re.search(r"_(\d+)_", qseqid)

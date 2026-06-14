@@ -267,23 +267,67 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 ## ardu parse
 
-Extracts individual metric columns from the semicolon-packed `coverage.tsv` into a flat, human-readable matrix.
+Extracts individual metric columns from the semicolon-packed `coverage.tsv` into a flat, human-readable matrix. At least one field flag must be provided. Missing or malformed entries are converted to `NA`. Output is a wide-format matrix: first column is `locus`, each additional column is a `sample_field` combination.
+
+Optionally, columns can be filtered by the value at a specific locus row, and the output can be written as a flat header list (e.g. to generate a BAM file list for downstream tools).
+
+### Basic usage
 
 ```bash
 ardu parse -i run1_coverage.tsv -o run1_rcn.tsv --RCN --medDOC
 ```
 
-At least one field flag must be provided. Missing or malformed entries are converted to `NA`. Output is a wide-format matrix: first column is `locus`, each additional column is a `sample_field` combination.
+### Filter columns by value at a specific locus
 
-| Argument | Description |
-|---|---|
-| `-i, --input` | Input ArDu coverage TSV. |
-| `-o, --output` | Output TSV file. |
-| `--uDOC` | Extract mean depth of coverage. |
-| `--sdDOC` | Extract standard deviation. |
-| `--medDOC` | Extract median depth of coverage. |
-| `--CovBases` | Extract covered bases. |
-| `--RCN` | Extract relative copy number. |
+Keep only samples where RCN > 1.4 at locus `ace1`, output as TSV:
+```bash
+ardu parse -i run1_coverage.tsv -o run1_rcn_filtered.tsv --RCN \
+  --filter "ace1:>:1.4"
+```
+
+Loci containing colons (e.g. genomic coordinates) are supported — the parser splits from the right:
+```bash
+ardu parse -i run1_coverage.tsv -o out.tsv --RCN \
+  --filter "AgamP4_2R:3437186-3639686:>=:2.0"
+```
+
+Alternatively, use the three explicit flags:
+```bash
+ardu parse -i run1_coverage.tsv -o out.tsv --RCN \
+  --filter-locus "ace1" --filter-op ">=" --filter-value 1.4
+```
+
+### Output as a header list (e.g. for BAM lists)
+
+Write one column name per line instead of a TSV matrix, optionally appending a suffix:
+```bash
+ardu parse -i run1_coverage.tsv -o bam_list.txt --RCN \
+  --filter "ace1:>:1.4" --format list --suffix .bam
+```
+
+This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions`.
+
+### Arguments
+
+| Argument | Description | Default |
+|---|---|---|
+| **Mandatory** | | |
+| `-i, --input` | Input ArDu coverage TSV. | |
+| `-o, --output` | Output file (TSV matrix or header list). | |
+| **Metric selection** | | |
+| `--uDOC` | Extract mean depth of coverage. | |
+| `--sdDOC` | Extract standard deviation. | |
+| `--medDOC` | Extract median depth of coverage. | |
+| `--CovBases` | Extract covered bases. | |
+| `--RCN` | Extract relative copy number. | |
+| **Filtering** | | |
+| `--filter` | Filter columns by value at a locus. Format: `LOCUS:OP:VALUE`, e.g. `ace1:>:1.4`. Loci containing colons are supported (split from the right). | `None` |
+| `--filter-locus` | Locus row to filter on (use with `--filter-op` and `--filter-value`). | `None` |
+| `--filter-op` | Comparison operator: `>`, `<`, `>=`, `<=`, `==`, `!=`. | `None` |
+| `--filter-value` | Numeric threshold for the filter. | `None` |
+| **Output format** | | |
+| `--format` | `tsv` — full filtered matrix (default); `list` — one column header per line. | `tsv` |
+| `--suffix` | Suffix appended to each header in `list` mode, e.g. `.bam`. | `""` |
 
 ---
 
