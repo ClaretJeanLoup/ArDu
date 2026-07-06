@@ -133,11 +133,6 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
   --breakpoint ruptures
 ```
 
-#### Graphical output with putative breakpoints identified through *ruptures*
-<p align="center">
-  <img src="ArDuRun-AgambR-2026-05-22/ace-1-plots/Yop16-60_ace-1_plot.png" width="700">
-</p>
-
 ### Arguments
 
 | Argument | Description | Default |
