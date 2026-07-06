@@ -262,9 +262,9 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 ## ardu parse
 
-Extracts individual metric columns from the semicolon-packed `coverage.tsv` into a flat, human-readable matrix. At least one field flag must be provided. Missing or malformed entries are converted to `NA`. Output is a wide-format matrix: first column is `locus`, each additional column is a `sample_field` combination.
+Extracts individual metric columns from the semicolon-separated `coverage.tsv` columns, into a more user-friendly matrix. At least one field flag must be provided. Missing or malformed entries are converted to `NA`. Output is a wide-format matrix: first column is `locus`, each additional column is tagged with a `sample_field` combination.
 
-Optionally, columns can be filtered by the value at a specific locus row, and the output can be written as a flat header list (e.g. to generate a BAM file list for downstream tools).
+Optionally, columns can be filtered by the value at a specific locus row, and the output can be written as a simple header list (e.g. to generate a BAM file list for downstream ArDu runs).
 
 ### Basic usage
 
@@ -279,22 +279,15 @@ Keep only samples where RCN > 1.4 at locus `ace1`, output as TSV:
 ardu parse -i run1_coverage.tsv -o run1_rcn_filtered.tsv --RCN \
   --filter "ace1:>:1.4"
 ```
-
-Loci containing colons (e.g. genomic coordinates) are supported — the parser splits from the right:
-```bash
-ardu parse -i run1_coverage.tsv -o out.tsv --RCN \
-  --filter "AgamP4_2R:3437186-3639686:>=:2.0"
-```
-
-Alternatively, use the three explicit flags:
+Alternatively, you can use the explicit flags:
 ```bash
 ardu parse -i run1_coverage.tsv -o out.tsv --RCN \
   --filter-locus "ace1" --filter-op ">=" --filter-value 1.4
 ```
 
-### Output as a header list (e.g. for BAM lists)
+### Output as a header list (e.g. for bam lists)
 
-Write one column name per line instead of a TSV matrix, optionally appending a suffix:
+Write one column name per line instead of a tsv file, optionally appending a suffix for downstram ArDu run:
 ```bash
 ardu parse -i run1_coverage.tsv -o bam_list.txt --RCN \
   --filter "ace1:>:1.4" --format list --suffix .bam
@@ -330,7 +323,7 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 
 ### `ArDuRun-{prefix}-{date}/`
 
-All outputs from `ardu coverage` are written to a timestamped run directory:
+All outputs from `ardu coverage` are written to a timestamped directory:
 
 | File | Description |
 |---|---|
@@ -342,16 +335,6 @@ All outputs from `ardu coverage` are written to a timestamped run directory:
 
 ---
 
-## Milesi's lab addendum
-As of January 2026, a shared ArDu environment is available on the UPPMAX project. Make sure to add the following lines to your script:
-```bash
-ENV=/gorilla/proj/cnvrule/snic2020-6-185/software/envs/ardu_shared
-export PATH=$ENV/bin:$PATH
-export PYTHONNOUSERSITE=1
-
-$ENV/bin/python $ENV/ArDu_1.0.py ...
-```
-
 *Now go out there and hunt some duplications!*
 
 ---
@@ -361,22 +344,22 @@ $ENV/bin/python $ENV/ArDu_1.0.py ...
 ```
 Error processing BAM file TestRun.bam: no index available for pileup
 ```
-→ No index found. Check for `.bai` files and make sure their names match the BAM files.
+→ No index found. Check for `.bai` files in the .bam directory and make sure their names match the BAM files.
 
 ```
 Error processing BAM file TestRun.bam: invalid literal for int() with base 10: 'st'
 ```
-→ Invalid line in the `-r` region file. Most likely a header that should be removed.
+→ Invalid line in the `-r` region file. Make sure the file doesn't have a header.
 
 ---
 
 ## Gene Copy Number Estimates, word of caution and best practises
 
-ArDu uses depth of coverage from BAM alignment files to estimate copy number at target loci, normalised by a user-provided reference. Depending on the reference used, this normalised depth can be directly used as a copy number proxy (Claret et al. 2023).
+ArDu uses depth of coverage from BAM alignment files to estimate copy number at target loci, normalised by a user-provided reference. Depending on the reference used, this normalised depth can be directly used as a copy-number proxy (Claret et al. 2023).
 
-The choice of reference is critical. A wide range of genomic intervals can be used, from whole chromosomes to a single gene, but we have seen consistent improvement in precision when using exonic sequences of a few housekeeping genes.
+The choice of reference is critical. A wide range of genomic intervals can be used, from whole chromosome to a single gene, but we have seen consistent improvement in precision when using exonic sequences of a few housekeeping genes. Be aware that really large copy number variations (e.g. in the hundreds) will produce noisy epth of coverage profiles and wil lresults in poor CN estimates. 
 
-ArDu is specifically designed around a candidate locus approach. While it can handle large numbers of targets, it is not its intended use — expect long run times and reduced usability at genome-wide scale.
+ArDu is specifically designed around a candidate locus approach. While it can handle large numbers of targets, it is not its intended use, so expect long run times and reduced usability at genome wide scale.
 
 ---
 
