@@ -64,7 +64,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o ArduExampleRun \
   --breakpoint ruptures
 ```
 
-The normalised depth of coverage rises from ~1.5 to ~3 at breakpoint 1 (AgamP4_2R:3,437,186) and drops back at breakpoint 2 (AgamP4_2R:3,639,686), consistent with a heterozygous tandem duplication. The two predicted breakpoints are numbered in the same order as the `_breakpoints.tsv` output.
+The normalised depth of coverage rises from ~1 to ~3 at breakpoint 1 (AgamP4_2R:3,437,186) and drops back at breakpoint 2 (AgamP4_2R:3,639,686), consistent with a heterozygous tandem duplication. The two predicted breakpoints are numbered in the same order as the `_breakpoints.tsv` output.
 
 <p align="center">
   <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/ace-1-plots/Yop16-60_ace-1_plot.png" width="800">
@@ -80,7 +80,7 @@ ardu junctions -b bamlist.txt \
   -o JunctionTest
 ```
 
-The softclip pileup confirms both breakpoints at base-pair resolution. The mode of soft-clipped reads at breakpoint 1 falls at position 3,436,927 (259 bp upstream of the coverage-based prediction) and at 3,640,306 for breakpoint 2 (620 bp downstream). Spanning reads containing softclip sequences from both breakpoints were recovered and written to `Yop16-60_1-2_junction_reads.fasta`.
+The softclip pileup confirms both breakpoints at base-pair resolution. The mode of soft-clipped reads at breakpoint 1 falls at position 3,436,927 (259 bp upstream of the coverage-based prediction and right on top of the breakpoint confirmed by Assogba et al., 2016) and at 3,640,306 for breakpoint 2 (620 bp downstream, 470 pb below the second breakpoint found in the previous study). Spanning reads containing softclip sequences from both breakpoints were recovered and written to `Yop16-60_1-2_junction_reads.fasta`.
 
 <p align="center">
   <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/junctions/JunctionTest_Yop16-60_softclip_dist.png" width="800">
