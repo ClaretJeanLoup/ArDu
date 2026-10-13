@@ -195,6 +195,7 @@ def _resolve_plot_interval(
                     region=str_incr_span,
                     min_base_quality=13,
                     min_mapping_quality=20,
+                    Truncate=TRUE,
                 )
             ]
         return str_incr_span, depth_data
@@ -233,6 +234,7 @@ def _resolve_plot_interval(
                     region=str_incr_span,
                     min_base_quality=13,
                     min_mapping_quality=20,
+                    Truncate=TRUE,
                 )
             ]
         return str_incr_span, depth_data
@@ -262,6 +264,7 @@ def _resolve_plot_interval(
                     region=str_incr_span,
                     min_base_quality=13,
                     min_mapping_quality=20,
+                    Truncate=TRUE,
                 )
             ]
         return str_incr_span, depth_data
