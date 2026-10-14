@@ -16,6 +16,73 @@ from tqdm import tqdm
 
 
 # ---------------------------------------------------------------------------
+# Shared depth computation
+# ---------------------------------------------------------------------------
+
+MIN_BASE_QUALITY = 13
+MIN_MAPPING_QUALITY = 20
+
+
+def passes_read_filters(read: pysam.AlignedSegment) -> bool:
+    """Read-level filter shared by every depth computation in ArDu."""
+    return not (
+        read.is_unmapped
+        or read.is_secondary
+        or read.is_qcfail
+        or read.is_duplicate
+    ) and read.mapping_quality >= MIN_MAPPING_QUALITY
+
+
+def parse_region(region: str) -> tuple[str, int, int]:
+    """Parse a samtools-style ``chrom:start-end`` (1-based, inclusive) region.
+
+    Returns ``(chrom, start, end)`` as 0-based half-open coordinates.
+    """
+    chrom, _, span = region.rpartition(":")
+    if not chrom:
+        raise ValueError(f"Region '{region}' has no start-end range")
+    start_str, end_str = span.replace(",", "").split("-")
+    return chrom, int(start_str) - 1, int(end_str)
+
+
+def depth_array(
+    samfile: pysam.AlignmentFile,
+    chrom: str,
+    start: int,
+    end: int,
+) -> np.ndarray:
+    """Per-base depth over ``[start, end)``, 0-based, with zeros where uncovered.
+
+    Bases below ``MIN_BASE_QUALITY`` and reads failing
+    :func:`passes_read_filters` are not counted.
+    """
+    start = max(0, start)
+    end = min(end, samfile.get_reference_length(chrom))
+    if end <= start:
+        return np.zeros(0, dtype=np.int64)
+    acgt = samfile.count_coverage(
+        chrom,
+        start=start,
+        stop=end,
+        quality_threshold=MIN_BASE_QUALITY,
+        read_callback=passes_read_filters,
+    )
+    return np.sum(np.array(acgt), axis=0)
+
+
+def depth_over_region(bam_file: str, region: str) -> list[tuple[int, int]]:
+    """``(pos, depth)`` for every base of a ``chrom:start-end`` region.
+
+    Positions are 0-based; uncovered bases are reported with depth 0.
+    """
+    chrom, start, end = parse_region(region)
+    with pysam.AlignmentFile(bam_file, "rb") as samfile:
+        depth = depth_array(samfile, chrom, start, end)
+    start = max(0, start)
+    return list(zip(range(start, start + len(depth)), depth.tolist()))
+
+
+# ---------------------------------------------------------------------------
 # Soft-clip detection
 # ---------------------------------------------------------------------------
 
@@ -103,8 +170,9 @@ def calculate_nucleotide_counts(
         a, c, g, t = samfile.count_coverage(
             chromosome,
             start=pos - 1,
-            end=pos,
-            quality_threshold=13,
+            stop=pos,
+            quality_threshold=MIN_BASE_QUALITY,
+            read_callback=passes_read_filters,
         )
     counts = {
         "A": int(a[0]) if len(a) > 0 else 0,
@@ -148,26 +216,25 @@ def calculate_coverage_stats(
                 total=len(regions),
                 desc="Processing targets",
             ):
-                coverage_values: list[int] = []
+                per_region = []
                 for region in region_list:
                     if not region:
                         continue
-                    for pileupcolumn in samfile.pileup(
-                        region=region,
-                        min_base_quality=13,
-                        min_mapping_quality=20,
-                    ):
-                        coverage_values.append(pileupcolumn.n)
+                    chrom, start, end = parse_region(region)
+                    per_region.append(depth_array(samfile, chrom, start, end))
+                coverage_values = (
+                    np.concatenate(per_region) if per_region else np.zeros(0)
+                )
 
-                if coverage_values:
+                if coverage_values.size:
                     mean_cov = np.mean(coverage_values)
                     median_cov = np.median(coverage_values)
                     sd_cov = (
                         np.std(coverage_values, ddof=1)
-                        if len(coverage_values) > 1
+                        if coverage_values.size > 1
                         else 0.0
                     )
-                    covbases = len(coverage_values)
+                    covbases = int(np.count_nonzero(coverage_values))
                 else:
                     mean_cov = median_cov = sd_cov = covbases = "NA"
 

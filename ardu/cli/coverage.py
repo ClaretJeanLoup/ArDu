@@ -18,7 +18,11 @@ import numpy as np
 import pandas as pd
 import pysam
 
-from ardu.bam import calculate_coverage_stats, calculate_nucleotide_counts
+from ardu.bam import (
+    calculate_coverage_stats,
+    calculate_nucleotide_counts,
+    depth_over_region,
+)
 from ardu.intervals import get_regions, get_totalspan, parse_plot_intervals
 from ardu.plotting import make_pooled_plot, render_per_sample_plot
 from ardu.probe import build_probe_profile, write_probe_profiles_tsv
@@ -188,16 +192,11 @@ def _resolve_plot_interval(
         if str_incr_span is None:
             print(f"Warning: {locus} not found in plot interval file. Skipping.")
             return None, []
-        with pysam.AlignmentFile(bam_file, "rb") as samfile:
-            depth_data = [
-                (p.pos, p.n)
-                for p in samfile.pileup(
-                    region=str_incr_span,
-                    min_base_quality=13,
-                    min_mapping_quality=20,
-                    Truncate=TRUE,
-                )
-            ]
+        try:
+            depth_data = depth_over_region(bam_file, str_incr_span)
+        except (ValueError, KeyError) as exc:
+            print(f"Warning: bad plot interval '{str_incr_span}' for {locus} ({exc}). Skipping.")
+            return None, []
         return str_incr_span, depth_data
 
     if args.plot_auto:
@@ -227,16 +226,7 @@ def _resolve_plot_interval(
             max_extension=args.max_extension,
             symmetric=args.probe_symmetric,
         )
-        with pysam.AlignmentFile(bam_file, "rb") as samfile:
-            depth_data = [
-                (p.pos, p.n)
-                for p in samfile.pileup(
-                    region=str_incr_span,
-                    min_base_quality=13,
-                    min_mapping_quality=20,
-                    Truncate=TRUE,
-                )
-            ]
+        depth_data = depth_over_region(bam_file, str_incr_span)
         return str_incr_span, depth_data
 
     if args.plot_proportion:
@@ -257,16 +247,7 @@ def _resolve_plot_interval(
             print(f"Warning: invalid extension for locus {locus}. Skipping.")
             return None, []
         str_incr_span = f"{chromosome}:{plotStart}-{plotStop}"
-        with pysam.AlignmentFile(bam_file, "rb") as samfile:
-            depth_data = [
-                (p.pos, p.n)
-                for p in samfile.pileup(
-                    region=str_incr_span,
-                    min_base_quality=13,
-                    min_mapping_quality=20,
-                    Truncate=TRUE,
-                )
-            ]
+        depth_data = depth_over_region(bam_file, str_incr_span)
         return str_incr_span, depth_data
 
     return None, []

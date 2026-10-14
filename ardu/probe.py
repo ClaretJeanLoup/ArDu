@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import pysam
 
+from ardu.bam import depth_array
+
 
 # ---------------------------------------------------------------------------
 # Adaptive interval expansion
@@ -114,10 +116,7 @@ def expand_interval(
         fetch_end = right_max_ext
         if verbose:
             print(f"[DEBUG] Fetching coverage for {chrom}:{fetch_start}-{fetch_end} ...")
-        cov_tuple = samfile.count_coverage(
-            chrom, start=fetch_start, end=fetch_end, quality_threshold=13
-        )
-        coverage_array = np.sum(np.array(cov_tuple), axis=0)
+        coverage_array = depth_array(samfile, chrom, fetch_start, fetch_end)
 
     if verbose:
         print(f"[DEBUG] Coverage fetched, length={len(coverage_array)} bases")
@@ -289,10 +288,7 @@ def build_probe_profile(
     with pysam.AlignmentFile(bam_file, "rb") as sam:
         chrom_len = dict(zip(sam.references, sam.lengths)).get(chrom, fetch_end)
         fetch_end = min(fetch_end, chrom_len)
-        raw = sam.count_coverage(
-            chrom, start=fetch_start, end=fetch_end, quality_threshold=13
-        )
-    coverage_array = np.sum(np.array(raw), axis=0)
+        coverage_array = depth_array(sam, chrom, fetch_start, fetch_end)
     offset = fetch_start
     target_centre = (start + end) // 2
 
