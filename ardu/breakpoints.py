@@ -22,31 +22,80 @@ from ardu.signal import detect_shifts
 # Univariate ruptures (per-sample)
 # ---------------------------------------------------------------------------
 
+PENALTY_BIN = 500
+REFINE_BINS = 5
+
+
+def binned_signal(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Mean normalised depth per bin and the row of *d* where each bin starts.
+
+    Bins are those of ``--plot-bin`` when *d* was binned, else
+    :data:`PENALTY_BIN` bp.
+    """
+    keys = d["genomic_bins"] if "genomic_bins" in d.columns else d["pos"] // PENALTY_BIN
+    means = d["norm"].groupby(keys, observed=True, sort=True).mean().to_numpy()
+    starts = d.index.to_series(index=d.index).groupby(keys, observed=True, sort=True).min()
+    return means, starts.to_numpy()
+
+
+def scaled_penalty(signal: np.ndarray, pen: float) -> float:
+    """*pen* times sigma squared times log(n), sigma being the noise of
+    *signal* estimated from the differences between consecutive values.
+    """
+    diffs = np.diff(signal)
+    sigma = 1.4826 * np.median(np.abs(diffs - np.median(diffs))) / np.sqrt(2)
+    return pen * sigma ** 2 * np.log(len(signal))
+
+
+def refine_breakpoint(norm: np.ndarray, start: int, end: int, min_size: int = 50) -> int:
+    """Row in ``[start, end)`` that best splits *norm* there into two segments
+    of different mean (least squares), at least *min_size* rows each.
+    """
+    x = norm[start:end]
+    n = len(x)
+    if n < 2 * min_size:
+        return start + n // 2
+    csum, csum2 = np.cumsum(x), np.cumsum(x ** 2)
+    k = np.arange(min_size, n - min_size + 1)
+    left = csum2[k - 1] - csum[k - 1] ** 2 / k
+    right = (csum2[-1] - csum2[k - 1]) - (csum[-1] - csum[k - 1]) ** 2 / (n - k)
+    return start + int(k[np.argmin(left + right)])
+
+
 def run_ruptures_univariate(
     d: pd.DataFrame,
     algo_name: str = "BottomUp",
     model: str = "l2",
     signal_col: str = "moving_average",
     n_bkps: int = 2,
-    pen: int | None = None,
+    pen: float | None = None,
 ) -> list[dict]:
     """Run ruptures on a single sample's signal.
+
+    With *n_bkps*, ruptures looks for that many breakpoints in the per-base
+    *signal_col*. With *pen*, the number of breakpoints is free: ruptures runs
+    on the mean normalised depth per bin (see :func:`binned_signal`), and a
+    breakpoint is kept when it lowers the cost by more than
+    ``pen * sigma^2 * log(n)`` (:func:`scaled_penalty`). The penalty is then
+    independent of depth, noise and region length; about 10 suits depth data,
+    lower values find smaller steps. Each breakpoint is then moved to the best
+    split of the per-base normalised depth within :data:`REFINE_BINS` bins on
+    either side (:func:`refine_breakpoint`).
 
     Parameters
     ----------
     d:
-        Per-base depth DataFrame with at least ``"pos"`` and *signal_col*.
+        Per-base depth DataFrame with at least ``"pos"``, ``"norm"`` and *signal_col*.
     algo_name:
         ruptures algorithm class name (e.g. ``"BottomUp"``, ``"Pelt"``).
     model:
         ruptures cost model (e.g. ``"l2"``, ``"rbf"``).
     signal_col:
-        Column of *d* to use as the signal.
+        Column of *d* to use as the signal (without *pen*).
     n_bkps:
         Expected number of breakpoints (used when *pen* is ``None``).
     pen:
-        Penalty value passed to ``predict(pen=pen)``; overrides *n_bkps*
-        when provided.
+        Penalty multiplier; overrides *n_bkps* when provided.
 
     Returns
     -------
@@ -56,14 +105,25 @@ def run_ruptures_univariate(
         responsible for resolving the genomic position from ``d.loc[row_index]``.
     """
     algo_class = getattr(rpt, algo_name)
-    signal = d[signal_col].to_numpy().reshape(-1, 1)
-    algo = algo_class(model=model).fit(signal)
-    result = algo.predict(pen=pen) if pen is not None else algo.predict(n_bkps=n_bkps)
+    if pen is None:
+        signal = d[signal_col].to_numpy().reshape(-1, 1)
+        result = algo_class(model=model).fit(signal).predict(n_bkps=n_bkps)
+        rows = result[:-1]
+    else:
+        means, starts = binned_signal(d)
+        if len(means) < 4:
+            return []
+        result = algo_class(model=model, min_size=2).fit(means.reshape(-1, 1)).predict(
+            pen=scaled_penalty(means, pen)
+        )
+        norm = d["norm"].to_numpy()
+        bounds = list(starts) + [len(d)]
+        rows = [refine_breakpoint(norm, int(bounds[max(0, i - REFINE_BINS)]),
+                                  int(bounds[min(len(bounds) - 1, i + REFINE_BINS)]))
+                for i in result[:-1]]
 
-    breakpoints = []
-    for line_num, b in enumerate(result[:-1], start=1):
-        breakpoints.append({"row_index": b, "breakpoint_number": line_num})
-    return breakpoints
+    return [{"row_index": b, "breakpoint_number": line_num}
+            for line_num, b in enumerate(rows, start=1)]
 
 
 # ---------------------------------------------------------------------------

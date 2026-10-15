@@ -145,8 +145,12 @@ def register(subparsers) -> None:
                              "moving_variances, or covariance. Default=moving_average.")
     parser.add_argument("--bkp-nb", type=int, default=2,
                         help="Expected number of breakpoints (ruptures). Default=2.")
-    parser.add_argument("--bkp-pen", type=int,
-                        help="Penalty for ruptures predict(). Higher = fewer breakpoints.")
+    parser.add_argument("--bkp-pen", type=float,
+                        help="Find the number of breakpoints with a penalty instead of "
+                             "--bkp-nb: ruptures runs on the mean normalised depth per bin "
+                             "(--plot-bin, else 500 bp) with a penalty of this value times "
+                             "the noise variance times log(number of bins). About 10 suits "
+                             "depth data; lower finds smaller steps.")
     parser.add_argument("--bkp-model", type=str, default="l2",
                         help="ruptures cost model. Default=l2.")
     parser.add_argument("--bkp-algo", type=str, default="BottomUp",
@@ -316,6 +320,8 @@ def _build_depth_df(
         b = _parse_bound(args.plot_doclim[1], norm_min, norm_max)
         d = d[(d["norm"] >= a) & (d["norm"] <= b)].reset_index(drop=True)
 
+    # binning below averages pos within bins; breakpoints are reported per base
+    d["base_pos"] = d["pos"]
     d["moving_average"] = window_median(d["norm"].to_numpy(), args.plot_slw)
     d["moving_variances"] = window_variance(d["norm"].to_numpy(), args.plot_slw)
     d["pos"], d["covariance"] = compute_sliding_covariance(d, args.plot_slw)

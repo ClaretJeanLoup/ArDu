@@ -157,7 +157,7 @@ def render_per_sample_plot(
             b = entry["row_index"]
             line_num = entry["breakpoint_number"]
             try:
-                bp_pos = int(d.loc[b, "pos"])
+                bp_pos = int(d.loc[b, "base_pos" if "base_pos" in d.columns else "pos"])
             except (KeyError, ValueError, TypeError):
                 print(f"Warning: invalid position at row {b}, skipping.")
                 continue
