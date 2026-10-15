@@ -623,10 +623,12 @@ def run(args) -> None:
                 search_regions = list(regions_by_bkp.values())
 
             all_matches = []
-            for search_region in search_regions:
+            for i, search_region in enumerate(search_regions):
+                # unplaced unmapped reads are scanned once, with the first region
                 all_matches.extend(
                     find_reads_with_multiple_softclips_aho(
-                        bam_file, automaton, search_region, allowed_pairs
+                        bam_file, automaton, search_region, allowed_pairs,
+                        include_unplaced=(i == 0),
                     )
                 )
 
