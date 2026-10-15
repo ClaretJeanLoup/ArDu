@@ -28,7 +28,7 @@ from ardu.bam import (
 from ardu.intervals import get_regions, get_totalspan, parse_plot_intervals
 from ardu.plotting import make_pooled_plot, render_per_sample_plot
 from ardu.probe import build_probe_profile, write_probe_profiles_tsv
-from ardu.signal import compute_sliding_covariance, window_median, window_variance
+from ardu.signal import bootstrap_median_ratio, compute_sliding_covariance, window_median, window_variance
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +67,16 @@ def register(subparsers) -> None:
     parser.add_argument("--min-baseq", type=int, default=None,
                         help="Minimum base quality counted in depth and mutation "
                              "counts. Default=13.")
+
+    # RCN uncertainty
+    parser.add_argument("--rcn-ci", type=int, default=0, metavar="N",
+                        help="Add a 95%% confidence interval to each RCN from N block "
+                             "bootstrap replicates (two extra fields per cell). "
+                             "Default=0 (off).")
+    parser.add_argument("--ci-block", type=int, default=500,
+                        help="Block size (bp) of the RCN bootstrap. Default=500.")
+    parser.add_argument("--ci-seed", type=int, default=1,
+                        help="Random seed of the RCN bootstrap. Default=1.")
 
     # Parallelism
     parser.add_argument("-t", "--threads", type=int, default=1,
@@ -360,7 +370,8 @@ def _process_one_bam(
     bam_name = os.path.basename(bam_file).removesuffix(".bam")
     print(f"Processing {bam_name}")
 
-    locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file)
+    depth_arrays = {} if args.rcn_ci > 0 else None
+    locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file, depth_arrays)
 
     if args.norm not in locus_coverage_df["locus"].values:
         print(f"Normalisation locus not found in {bam_file}. Skipping.")
@@ -376,6 +387,15 @@ def _process_one_bam(
     locus_coverage_df["normalised"] = locus_coverage_df["median"].apply(
         lambda x: x / ref_median if isinstance(x, (int, float)) else "NA"
     )
+    if depth_arrays is not None:
+        rng = np.random.default_rng(args.ci_seed)
+        bounds = [
+            bootstrap_median_ratio(depth_arrays.get(locus, np.zeros(0)), depth_arrays[args.norm],
+                                   args.rcn_ci, args.ci_block, rng)
+            for locus in locus_coverage_df["locus"]
+        ]
+        locus_coverage_df["rcn_low"] = [b[0] for b in bounds]
+        locus_coverage_df["rcn_high"] = [b[1] for b in bounds]
     locus_coverage_df["bam_file"] = bam_name
 
     if not args.plot:
@@ -511,7 +531,10 @@ def _format_row(row) -> str:
         covered = "NA"
     # RCN keeps 4 decimals: one decimal hides differences such as 0.04 against 0.08 (e.g. heteroplasmic deletions)
     norm = _f(row["normalised"], 4)
-    return f"{mean};{sd};{median};{covered};{norm}"
+    cell = f"{mean};{sd};{median};{covered};{norm}"
+    if "rcn_low" in row.index:
+        cell += f";{_f(row['rcn_low'], 4)};{_f(row['rcn_high'], 4)}"
+    return cell
 
 
 # ---------------------------------------------------------------------------
@@ -630,12 +653,19 @@ def run(args) -> None:
         with open(cov_out, "w") as fh:
             fh.write("# ArDu coverage outfile\n")
             fh.write(f"# Generated on: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}\n")
-            fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;RCN\n")
+            if args.rcn_ci > 0:
+                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;RCN;RCN_low;RCN_high\n")
+            else:
+                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;RCN\n")
             fh.write("# uDoC:     mean Depth of Coverage over the entire target span.\n")
             fh.write("# sdDoC:    standard deviation of Depth of Coverage.\n")
             fh.write("# medDoC:   median Depth of Coverage over the entire locus span.\n")
             fh.write("# CovBases: total number of covered bases on locus span.\n")
-            fh.write("# RCN:      relative copy number.\n")
+            fh.write("# RCN:      relative copy number (median depth of the locus / median depth "
+                     "of the normalisation locus, i.e. copies per normalisation-locus copy).\n")
+            if args.rcn_ci > 0:
+                fh.write(f"# RCN_low, RCN_high: 95% interval of RCN from {args.rcn_ci} block bootstrap "
+                         f"replicates ({args.ci_block} bp blocks, seed {args.ci_seed}).\n")
             pivot_df.to_csv(fh, sep="\t", index=False)
         print(f"Coverage data saved to {cov_out}")
     else:

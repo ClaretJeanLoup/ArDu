@@ -13,6 +13,8 @@ FIELD_MAP = {
     "medDOC":   2,
     "CovBases": 3,
     "RCN":      4,
+    "RCNlow":   5,
+    "RCNhigh":  6,
 }
 
 _OPS = {
@@ -55,6 +57,8 @@ def register(subparsers) -> None:
     parser.add_argument("--medDOC",   action="store_true", help="Extract median depth of coverage.")
     parser.add_argument("--CovBases", action="store_true", help="Extract covered bases.")
     parser.add_argument("--RCN",      action="store_true", help="Extract relative copy number.")
+    parser.add_argument("--RCNlow",   action="store_true", help="Extract lower bound of the RCN interval (needs --rcn-ci in coverage).")
+    parser.add_argument("--RCNhigh",  action="store_true", help="Extract upper bound of the RCN interval (needs --rcn-ci in coverage).")
 
     # filtering
     parser.add_argument(
@@ -165,7 +169,7 @@ def run(args) -> None:
     if not requested_fields:
         raise ValueError(
             "No fields selected. Use at least one of: "
-            "--uDOC --sdDOC --medDOC --CovBases --RCN"
+            "--uDOC --sdDOC --medDOC --CovBases --RCN --RCNlow --RCNhigh"
         )
 
     locus, op, value = _resolve_filter(args)

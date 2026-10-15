@@ -146,3 +146,36 @@ def detect_shifts(
 
     diff = np.asarray(ma_smooth) - np.asarray(norm_smooth)
     return data[np.abs(diff) > threshold]
+
+
+def bootstrap_median_ratio(
+    num: np.ndarray,
+    den: np.ndarray,
+    n_boot: int,
+    block: int,
+    rng: np.random.Generator,
+) -> tuple[float, float]:
+    """95% interval of ``median(num) / median(den)`` by block bootstrap.
+
+    Neighbouring bases share reads, so bases are resampled in contiguous
+    blocks of *block* bp, independently in the locus and the normalisation
+    locus. Returns ``(nan, nan)`` when either array is empty.
+    """
+    if num.size == 0 or den.size == 0:
+        return float("nan"), float("nan")
+
+    def blocks(a):
+        b = max(1, min(block, a.size))
+        return [a[i:i + b] for i in range(0, a.size, b)]
+
+    nb, db = blocks(num), blocks(den)
+    ratios = np.empty(n_boot)
+    for k in range(n_boot):
+        n = np.concatenate([nb[i] for i in rng.integers(0, len(nb), len(nb))])
+        d = np.concatenate([db[i] for i in rng.integers(0, len(db), len(db))])
+        md = np.median(d)
+        ratios[k] = np.median(n) / md if md > 0 else np.nan
+    ratios = ratios[~np.isnan(ratios)]
+    if ratios.size == 0:
+        return float("nan"), float("nan")
+    return float(np.percentile(ratios, 2.5)), float(np.percentile(ratios, 97.5))

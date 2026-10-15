@@ -58,3 +58,20 @@ def test_mutation_output_unchanged_without_flag(synthetic, tmp_path):
     run_dir = run_coverage(synthetic, tmp_path, "--mutation", str(tmp_path / "mut.tsv"))
     cell = open(os.path.join(run_dir, "test_mutations.tsv")).read().splitlines()[1].split("\t")[1]
     assert [kv.split("=")[0] for kv in cell.split(";")] == ["A", "T", "C", "G", "depth"]
+
+
+def test_rcn_interval(synthetic, tmp_path):
+    rcn = read_rcn(run_coverage(synthetic, tmp_path, "--rcn-ci", "200"))
+    low, high = float(rcn["dup"][5]), float(rcn["dup"][6])
+    assert low <= 2.0 <= high
+    assert high - low < 0.5
+    out = subprocess.run([sys.executable, "-m", "ardu", "parse", "-i",
+                          glob.glob(os.path.join(tmp_path, "ArDuRun-test-*", "test_coverage.tsv"))[0],
+                          "--RCN", "--RCNlow", "--RCNhigh"], check=True, capture_output=True, text=True)
+    parsed = glob.glob(os.path.join(tmp_path, "ArDuRun-test-*", "RCN_RCNlow_RCNhigh.tsv"))
+    assert parsed and "_RCNlow" in open(parsed[0]).readline()
+
+
+def test_no_interval_by_default(synthetic, tmp_path):
+    rcn = read_rcn(run_coverage(synthetic, tmp_path))
+    assert len(rcn["dup"]) == 5

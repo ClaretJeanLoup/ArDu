@@ -246,6 +246,7 @@ def calculate_indel_counts(
 def calculate_coverage_stats(
     regions: dict[str, list[str]],
     bam_file: str,
+    arrays: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
     """Compute mean, median, and sd of depth of coverage for each named locus.
 
@@ -256,6 +257,9 @@ def calculate_coverage_stats(
         :func:`ardu.intervals.get_regions`.
     bam_file:
         Path to an indexed BAM file.
+    arrays:
+        Optional dict filled with the per-base depth array of each locus
+        (used for the RCN bootstrap).
 
     Returns
     -------
@@ -281,6 +285,8 @@ def calculate_coverage_stats(
                 coverage_values = (
                     np.concatenate(per_region) if per_region else np.zeros(0)
                 )
+                if arrays is not None:
+                    arrays[name] = coverage_values
 
                 if coverage_values.size:
                     mean_cov = np.mean(coverage_values)
