@@ -108,6 +108,15 @@ Or directly without cloning:
 pip install git+https://github.com/ClaretJeanLoup/ArDu.git
 ```
 
+### With conda:
+`environment.yml` holds a minimal environment (the dependencies below, plus BLAST for `--blast` and pytest for the tests) and installs ArDu from the clone:
+```bash
+git clone https://github.com/ClaretJeanLoup/ArDu.git
+cd ArDu
+conda env create -f environment.yml
+conda activate ardu
+```
+
 This installs all dependencies automatically and registers the `ardu` command.
 
 ### Dependencies
@@ -117,6 +126,13 @@ All dependencies are resolved automatically by pip:
 ### Verify installation:
 ```bash
 ardu --help
+```
+
+### Run the tests:
+The tests build small synthetic BAMs with known answers (copy number, low MAPQ reads, junction reads, homopolymer lengths), so no data is needed:
+```bash
+pip install -e ".[test]"   # or use the conda environment above
+pytest
 ```
 
 ---
@@ -142,6 +158,13 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `-r, --region` | 4-column tab-delimited BED-like file: `chromosome start stop locus_name`. Regions sharing a name are pooled. | |
 | `-n, --norm` | Name of the normalisation locus in the region file. | |
 | `-o, --outfile` | Prefix for output file names. | |
+| **Read filters** | | |
+| `--min-mapq` | Minimum mapping quality of reads counted in depth and mutation counts. Lower it for loci with identical paralog copies in the reference, whose reads get MAPQ 0. | `20` |
+| `--min-baseq` | Minimum base quality counted in depth and mutation counts. | `13` |
+| **RCN uncertainty** | | |
+| `--rcn-ci` | Add a 95% interval to each RCN from N block bootstrap replicates (two extra fields per cell). | `0` (off) |
+| `--ci-block` | Block size (bp) of the bootstrap; bases are resampled in blocks because neighbouring bases share reads. | `500` |
+| `--ci-seed` | Random seed of the bootstrap. | `1` |
 | **Parallelism** | | |
 | `-t, --threads` | Number of parallel BAM processing workers. | `1` |
 | **Plotting** | | |
@@ -183,6 +206,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--bkp-passes` | Smoothing passes for rolling-average method. | `1` |
 | **Genotyping** | | |
 | `--mutation` | Tab-delimited file: `chromosome position [mutation_name]`. Returns per-nucleotide read counts at each position. | `None` |
+| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position (VCF-style anchor) and the length of the homopolymer run that follows it in each read. | `False` |
 
 ---
 
@@ -308,6 +332,7 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 | `--medDOC` | Extract median depth of coverage. | |
 | `--CovBases` | Extract covered bases. | |
 | `--RCN` | Extract relative copy number. | |
+| `--RCNlow`, `--RCNhigh` | Extract the bounds of the RCN interval (coverage run with `--rcn-ci`). | |
 | **Filtering** | | |
 | `--filter` | Filter columns by value at a locus. Format: `LOCUS:OP:VALUE`, e.g. `ace1:>:1.4`. Loci containing colons are supported (split from the right). | `None` |
 | `--filter-locus` | Locus row to filter on (use with `--filter-op` and `--filter-value`). | `None` |
@@ -323,13 +348,13 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 
 ### `ArDuRun-{prefix}-{date}/`
 
-All outputs from `ardu coverage` are written to a timestamped directory:
+All outputs from `ardu coverage` are written to a timestamped directory. A second run with the same prefix on the same day goes to `ArDuRun-{prefix}-{date}_2`, `_3`, ... instead of overwriting the first.
 
 | File | Description |
 |---|---|
-| `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;RCN`. |
+| `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;RCN`, followed by `;RCN_low;RCN_high` with `--rcn-ci`. RCN is written with 4 decimals. |
 | `*_breakpoints.tsv` | Predicted breakpoint positions (if `--breakpoint` used). Numbered in the same order as the plot. |
-| `*_mutations.tsv` | Per-position nucleotide counts (if `--mutation` used). Format: `A=;T=;C=;G=;depth=`. |
+| `*_mutations.tsv` | Per-position nucleotide counts (if `--mutation` used). Format: `A=;T=;C=;G=;depth=`, followed by `;ins=;del=;runs=` with `--mutation-indels` (e.g. `runs=T8:12,T9:3,T10:5`). |
 | `{locus}-plots/` | Per-locus plot directory. Contains per-sample and pooled plots. |
 | `junctions/` | All outputs from `ardu junctions` (created automatically). |
 
@@ -358,6 +383,10 @@ Error processing BAM file TestRun.bam: invalid literal for int() with base 10: '
 ArDu uses depth of coverage from BAM alignment files to estimate copy number at target loci, normalised by a user-provided reference. Depending on the reference used, this normalised depth can be directly used as a copy-number proxy (Claret et al. 2023).
 
 The choice of reference is critical. A wide range of genomic intervals can be used, from whole chromosome to a single gene, but we have seen consistent improvement in precision when using exonic sequences of a few housekeeping genes. Be aware that really large copy number variations (e.g. in the hundreds) will produce noisy epth of coverage profiles and wil lresults in poor CN estimates. 
+
+RCN is the median depth of the locus divided by the median depth of the normalisation locus, so it counts copies per copy of the normalisation locus. With a single copy gene of a diploid genome as reference, RCN = 1 means two copies per cell; multiply by two for copies per diploid cell. Use `--rcn-ci` to judge whether a value differs from 1.
+
+Reads in identical paralog copies present in the reference get MAPQ 0 and are dropped by the default `--min-mapq 20`, which flattens the depth of such duplications. Lower `--min-mapq` (e.g. to 0) when the reference contains both copies.
 
 ArDu is specifically designed around a candidate locus approach. While it can handle large numbers of targets, it is not its intended use, so expect long run times and reduced usability at genome wide scale.
 
