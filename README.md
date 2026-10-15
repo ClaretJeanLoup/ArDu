@@ -198,7 +198,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `-bkp, --breakpoint` | Breakpoint detection method: `ruptures` or `rollingaverage`. | `None` |
 | `--bkp-slw` | Window size for rolling-average detection (bp). | `1000` |
 | `--bkp-nb` | Expected number of breakpoints (ruptures). | `2` |
-| `--bkp-pen` | Find the number of breakpoints with a penalty instead of `--bkp-nb`. ruptures then runs on the mean normalised depth per bin (`--plot-bin`, else 500 bp), keeping a breakpoint when it lowers the cost by more than this value times the noise variance times log(number of bins), so the same value works whatever the depth, noise and region length. Each breakpoint is then placed at base level within 5 bins. About 10 suits depth data (both ace-1 examples: 2 and 4 breakpoints within 300 bp of their junctions); lower values find smaller steps. | `None` |
+| `--bkp-pen` | Find the number of breakpoints with a penalty instead of `--bkp-nb` (also for the pooled breakpoints of `--plot-pooled`, each sample scaled by its own noise). ruptures then runs on the mean normalised depth per bin (`--plot-bin`, else 500 bp), keeping a breakpoint when it lowers the cost by more than this value times the noise variance times log(number of bins), so the same value works whatever the depth, noise and region length. Each breakpoint is then placed at base level within 5 bins. About 10 suits depth data (both ace-1 examples: 2 and 4 breakpoints within 300 bp of their junctions); lower values find smaller steps. | `None` |
 | `--bkp-model` | ruptures cost model. | `l2` |
 | `--bkp-algo` | ruptures algorithm. | `BottomUp` |
 | `--bkp-threshold` | Shift threshold for rolling-average method. | `0.5` |

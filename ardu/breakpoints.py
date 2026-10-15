@@ -130,18 +130,66 @@ def run_ruptures_univariate(
 # Multivariate ruptures (pooled across samples)
 # ---------------------------------------------------------------------------
 
+def _pooled_penalty_breakpoints(
+    sample_list: list[tuple[str, pd.DataFrame, str]],
+    algo_name: str, model: str, pen: float,
+) -> tuple[np.ndarray, list[dict]]:
+    """Pooled breakpoints with a penalty instead of a set number.
+
+    Each sample's mean normalised depth per :data:`PENALTY_BIN` bp bin (bins
+    shared by all samples) is divided by its noise (see :func:`scaled_penalty`),
+    and a breakpoint is kept when it lowers the summed cost by more than
+    ``pen * n_samples * log(n_bins)``, the single-sample penalty summed over
+    samples. Each breakpoint is then refined in every sample as in
+    :func:`run_ruptures_univariate` and placed at the median position.
+    """
+    columns = []
+    for _bam_name, d, _span in sample_list:
+        pos_col = "base_pos" if "base_pos" in d.columns else "pos"
+        means = d["norm"].groupby(d[pos_col] // PENALTY_BIN).mean()
+        diffs = np.diff(means.to_numpy())
+        sigma = 1.4826 * np.median(np.abs(diffs - np.median(diffs))) / np.sqrt(2)
+        columns.append(means / (sigma or 1.0))
+    matrix = pd.concat(columns, axis=1).sort_index().interpolate(limit_direction="both")
+    bins = matrix.index.to_numpy()
+    if len(bins) < 4:
+        return bins * PENALTY_BIN, []
+    result = getattr(rpt, algo_name)(model=model, min_size=2).fit(matrix.to_numpy()).predict(
+        pen=pen * matrix.shape[1] * np.log(len(bins))
+    )
+
+    breakpoints = []
+    for line_num, i in enumerate(result[:-1], start=1):
+        lo = bins[max(0, i - REFINE_BINS)] * PENALTY_BIN
+        hi = (bins[min(len(bins) - 1, i + REFINE_BINS)] + 1) * PENALTY_BIN
+        refined = []
+        for _bam_name, d, _span in sample_list:
+            pos = d["base_pos" if "base_pos" in d.columns else "pos"].to_numpy()
+            rows = np.flatnonzero((pos >= lo) & (pos < hi))
+            if len(rows) >= 100:
+                row = refine_breakpoint(d["norm"].to_numpy()[rows], 0, len(rows))
+                refined.append(pos[rows[row]])
+        breakpoints.append({
+            "position": int(np.median(refined)) if refined else int(bins[i] * PENALTY_BIN),
+            "breakpoint_number": line_num,
+            "method": "ruptures_pooled_multivariate",
+        })
+    return bins * PENALTY_BIN, breakpoints
+
+
 def run_ruptures_multivariate(
     sample_list: list[tuple[str, pd.DataFrame, str]],
     signal_col: str = "moving_average",
     algo_name: str = "BottomUp",
     model: str = "l2",
     n_bkps: int = 2,
-    pen: int | None = None,
+    pen: float | None = None,
 ) -> tuple[np.ndarray, list[dict]]:
     """Run multivariate ruptures on a pooled set of samples.
 
-    Samples are aligned to a shared position array (union of all positions)
-    and interpolated to fill gaps before stacking into a signal matrix.
+    With *n_bkps*, samples are aligned to a shared position array (union of
+    all positions) and interpolated to fill gaps before stacking into a
+    signal matrix. With *pen*, see :func:`_pooled_penalty_breakpoints`.
 
     Parameters
     ----------
@@ -163,6 +211,8 @@ def run_ruptures_multivariate(
     """
     if not sample_list:
         return np.array([]), []
+    if pen is not None:
+        return _pooled_penalty_breakpoints(sample_list, algo_name, model, pen)
 
     # Build union position array
     all_pos: set[int] = set()

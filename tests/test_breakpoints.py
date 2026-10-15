@@ -46,3 +46,11 @@ def test_refine_breakpoint():
     x = np.r_[np.ones(400), 2 * np.ones(600)]
     assert refine_breakpoint(x, 0, 1000) == 400
     assert refine_breakpoint(x, 200, 900) == 400
+
+
+def test_pooled_penalty_finds_shared_steps():
+    from ardu.breakpoints import run_ruptures_multivariate
+    samples = [(f"s{i}", _depth(500), "chr1:1-300000") for i in range(2)]
+    _, bkps = run_ruptures_multivariate(samples, algo_name="Pelt", pen=10)
+    assert len(bkps) == 3
+    assert all(abs(b["position"] - s) <= 100 for b, s in zip(bkps, STEPS))

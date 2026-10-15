@@ -1375,6 +1375,12 @@ def run(args) -> None:
     breakpoints_df["bam_file"] = breakpoints_df["bam_file"].apply(
         lambda x: os.path.basename(x) + ".bam"
     )
+    if (breakpoints_df["bam_file"] == "pooled.bam").any():
+        print("Warning: pooled breakpoints (ardu coverage --plot-pooled) are not analysed by "
+              "ardu junctions yet; only the per-sample breakpoints are used.")
+    if args.plot_mode in ("pooled", "both") and (args.plot_evidence or args.report):
+        print("Warning: --plot-evidence and --report are per sample; --plot-mode pooled "
+              "only applies to the insert and softclip plots.")
 
     with open(tsv_output, "w") as out:
         out.write(
