@@ -20,6 +20,7 @@ import pysam
 
 from ardu.bam import (
     calculate_coverage_stats,
+    configure_read_filters,
     calculate_nucleotide_counts,
     depth_over_region,
 )
@@ -55,6 +56,16 @@ def register(subparsers) -> None:
                         help="Name of the normalisation locus in the region file.")
     parser.add_argument("-o", "--outfile", required=True,
                         help="Prefix for output file names.")
+
+    # Read filters
+    parser.add_argument("--min-mapq", type=int, default=None,
+                        help="Minimum mapping quality of reads counted in depth and "
+                             "mutation counts. Default=20. Lower it for loci with "
+                             "identical paralog copies in the reference, whose reads "
+                             "get MAPQ 0.")
+    parser.add_argument("--min-baseq", type=int, default=None,
+                        help="Minimum base quality counted in depth and mutation "
+                             "counts. Default=13.")
 
     # Parallelism
     parser.add_argument("-t", "--threads", type=int, default=1,
@@ -339,6 +350,7 @@ def _process_one_bam(
         ``{locus: {bam_name: ratio_array}}``
     """
     bam_file, args, regions_dict, plot_intervals_cache, output_dir = args_tuple
+    configure_read_filters(args.min_mapq, args.min_baseq)
     bam_name = os.path.basename(bam_file).removesuffix(".bam")
     print(f"Processing {bam_name}")
 
@@ -503,6 +515,7 @@ def _format_row(row) -> str:
 def run(args) -> None:
     """Entry point for ``ardu coverage``."""
     start_time = time.time()
+    configure_read_filters(args.min_mapq, args.min_baseq)
     date_str = time.strftime("%Y-%m-%d")
     ArDuBase = os.path.splitext(os.path.basename(args.outfile))[0]
     ArDuBaseRun = f"{ArDuBase}-{date_str}"

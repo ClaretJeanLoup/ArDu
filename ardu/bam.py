@@ -23,6 +23,20 @@ MIN_BASE_QUALITY = 13
 MIN_MAPPING_QUALITY = 20
 
 
+def configure_read_filters(min_mapq: int | None = None, min_baseq: int | None = None) -> None:
+    """Override the default mapping and base quality thresholds.
+
+    Called at the start of each process (main and workers), so the values
+    apply whatever the multiprocessing start method. ``None`` keeps the
+    current value.
+    """
+    global MIN_MAPPING_QUALITY, MIN_BASE_QUALITY
+    if min_mapq is not None:
+        MIN_MAPPING_QUALITY = int(min_mapq)
+    if min_baseq is not None:
+        MIN_BASE_QUALITY = int(min_baseq)
+
+
 def passes_read_filters(read: pysam.AlignedSegment) -> bool:
     """Read-level filter shared by every depth computation in ArDu."""
     return not (
