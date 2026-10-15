@@ -16,6 +16,7 @@ dependencies:
   - pyahocorasick>=2.0
   - scikit-learn>=1.4
   - blast            # only for ardu softclips / junctions --blast
+  - mafft            # only for ardu junctions --junction --plot-evidence (junction read alignment)
   - pytest           # only to run the tests
   - pip
   - pip:

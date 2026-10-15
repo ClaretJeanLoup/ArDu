@@ -15,6 +15,8 @@ import subprocess
 from collections import Counter
 
 import matplotlib
+import matplotlib.colors
+import matplotlib.patches
 import matplotlib.pyplot as plt
 import matplotlib.ticker
 import numpy as np
@@ -25,6 +27,13 @@ matplotlib.use("Agg")
 
 from ardu import bam as bam_utils
 from ardu.bam import passes_read_filters, read_pair_info
+from ardu.junction_align import (
+    EXPECTED,
+    align_junction,
+    expected_junction,
+    mafft_available,
+    microhomology,
+)
 from ardu.junctionlib import (
     build_softclip_automaton,
     find_reads_with_multiple_softclips_aho,
@@ -83,7 +92,12 @@ def register(subparsers) -> None:
     parser.add_argument("--plot-evidence", action="store_true",
                         help="Plot, per sample and breakpoint pair, the softclips at both "
                              "breakpoints and the bridging pair inserts, with the evidence "
-                             "summary in the title.")
+                             "summary in the title. With --junction and MAFFT installed, "
+                             "also align the junction and split reads and add their "
+                             "consensus around the junction.")
+    parser.add_argument("--reference", metavar="FASTA",
+                        help="Indexed reference FASTA, used for the expected junction "
+                             "sequence and microhomology. Defaults to the --blast reference.")
     parser.add_argument("--plot-mode",
                         choices=["per-bam", "pooled", "both"],
                         default="per-bam",
@@ -278,9 +292,23 @@ def _clipped_end(start: int, cigar: str) -> tuple[int, str] | None:
     return start + sum(n for n, op in ops if op in "MDN=X") - 1, "R"
 
 
+def _soft_clip_length(cigartuples) -> int:
+    """Soft-clipped bases at the start of *cigartuples*, past any hard clip."""
+    n = 0
+    for op, length in cigartuples:
+        if op == 5:
+            continue
+        if op != 4:
+            break
+        n += length
+    return n
+
+
 def _split_read(read) -> tuple | None:
-    """Junction ends of a split read: ``(position, side, [(chrom, position, side), ...])``
-    for the primary alignment and each supplementary alignment of its SA tag.
+    """Junction ends of a split read: ``(position, side, [(chrom, position, side), ...],
+    sequence, offset)`` for the primary alignment and each supplementary
+    alignment of its SA tag; *offset* is the index of the first base right of
+    the junction in the read sequence.
     """
     if (read.is_supplementary or not read.has_tag("SA")
             or not passes_read_filters(read)):
@@ -294,25 +322,33 @@ def _split_read(read) -> tuple | None:
         end = _clipped_end(int(pos), cigar)
         if end is not None and int(mapq) >= bam_utils.MIN_MAPPING_QUALITY:
             others.append((chrom, *end))
-    return (*here, others) if others else None
+    if not others:
+        return None
+    if here[1] == "L":
+        offset = _soft_clip_length(read.cigartuples)
+    else:
+        offset = read.query_length - _soft_clip_length(reversed(read.cigartuples))
+    return (*here, others, read.query_sequence, offset)
 
 
-def _split_junctions(windows: dict, k1: tuple, k2: tuple) -> Counter:
-    """Split reads joining windows *k1* and *k2*, counted by junction
-    ``(pos1, side1, pos2, side2)``, the ends at *k1* first. Each read counts once.
+def _split_junctions(windows: dict, k1: tuple, k2: tuple) -> dict[tuple, list]:
+    """Split reads joining windows *k1* and *k2*, grouped by junction
+    ``(pos1, side1, pos2, side2)`` with the ends at *k1* first, as
+    ``{junction: [(read_id, sequence, offset), ...]}``. Each read counts once.
     """
-    junctions: Counter = Counter()
+    junctions: dict[tuple, list] = {}
     seen: set = set()
     for here, there in ((k1, k2), (k2, k1)):
         chrom, start, end = windows[there]["region"]
-        for read_id, (pos, side, others) in windows[here]["splits"].items():
+        for read_id, (pos, side, others, seq, offset) in windows[here]["splits"].items():
             if read_id in seen:
                 continue
             for o_chrom, o_pos, o_side in others:
                 if o_chrom == chrom and start < o_pos <= end:
                     seen.add(read_id)
-                    junctions[(pos, side, o_pos, o_side) if here == k1
-                              else (o_pos, o_side, pos, side)] += 1
+                    junction = ((pos, side, o_pos, o_side) if here == k1
+                                else (o_pos, o_side, pos, side))
+                    junctions.setdefault(junction, []).append((read_id, seq, offset))
                     break
     return junctions
 
@@ -590,18 +626,94 @@ def _evidence_text(ev: dict) -> str:
     pairs = f"{ev['bridging_pairs']} bridging pairs"
     if ev["bridging_pairs"]:
         pairs += f" ({ev['pair_orientation']}, median insert {ev['insert_median']:,.0f} bp)"
-    return (f"{ev['bam']} | {ev['locus']} BKP {ev['pair']}: {call}\n"
+    text = (f"{ev['bam']} | {ev['locus']} BKP {ev['pair']}: {call}\n"
             f"{ev['split_reads']} split reads, {junction_reads} junction reads, {pairs}")
+    if ev.get("aligned_reads"):
+        text += f"\n{ev['aligned_reads']} reads aligned"
+        if ev.get("junction_agreement") is not None:
+            text += f", {ev['junction_agreement']:.0%} agreement at the junction"
+        if ev.get("inserted_bases") is not None:
+            text += f", inserted bases: {ev['inserted_bases'] or 'none'}"
+    if ev.get("microhomology") is not None:
+        text += f", microhomology: {ev['microhomology'] or 'none'}"
+    return text
 
 
-def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str) -> None:
-    """Softclips at both breakpoints and bridging pair inserts of one SV, with
-    the evidence summarised in the title.
+_BASE_COLOURS = {"A": "#2ca02c", "C": "#1f77b4", "G": "#ff7f0e", "T": "#d62728"}
+
+
+def _draw_alignment_panel(ax, alignment: dict, flank: int = 30, max_reads: int = 40) -> None:
+    """Aligned reads around the junction: grey where a read agrees with the
+    consensus, coloured by base where it does not, dark for gaps.
     """
-    fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+    aligned, columns, junction_col = (
+        alignment["aligned"], alignment["columns"], alignment["junction_col"]
+    )
+    covered = [c for c, (_, depth, _) in enumerate(columns) if depth]
+    centre = junction_col if junction_col is not None else covered[len(covered) // 2]
+    lo, hi = max(covered[0], centre - flank), min(covered[-1] + 1, centre + flank)
+
+    def first_base(row):
+        return len(row) - len(row.lstrip("-"))
+
+    reads = sorted((n for n in aligned if n != EXPECTED), key=lambda n: first_base(aligned[n]))
+    names = ([EXPECTED] if EXPECTED in aligned else []) + reads[:max_reads]
+    codes = np.zeros((len(names), hi - lo))
+    for i, name in enumerate(names):
+        row = aligned[name]
+        start, end = first_base(row), len(row.rstrip("-")) - 1
+        for j, c in enumerate(range(lo, hi)):
+            if name != EXPECTED and not start <= c <= end:
+                continue
+            if row[c] == columns[c][0]:
+                codes[i, j] = 1
+            elif row[c] == "-":
+                codes[i, j] = 2
+            else:
+                codes[i, j] = 3 + "ACGT".find(row[c]) if row[c] in "ACGT" else 2
+    cmap = matplotlib.colors.ListedColormap(
+        ["white", "#d9d9d9", "#555555", *_BASE_COLOURS.values()]
+    )
+    ax.imshow(codes, aspect="auto", interpolation="nearest", cmap=cmap, vmin=0, vmax=6)
+    ax.set_xticks(range(hi - lo))
+    ax.set_xticklabels([columns[c][0] or " " for c in range(lo, hi)], fontsize=6,
+                       family="monospace")
+    ax.set_xlabel("Consensus", fontsize=9)
+    ax.set_yticks([0] if names and names[0] == EXPECTED else [])
+    ax.set_yticklabels(["expected"] if names and names[0] == EXPECTED else [], fontsize=8)
+    if junction_col is not None:
+        ax.axvline(junction_col - lo - 0.5, color="black", linewidth=1.5)
+    stats = alignment["stats"]
+    title = f"{stats['aligned_reads']} reads aligned (MAFFT)"
+    if stats["junction_depth"] is not None:
+        title += (f", junction depth {stats['junction_depth']}, "
+                  f"agreement {stats['junction_agreement']:.0%}")
+    if len(reads) > max_reads:
+        title += f"\nfirst {max_reads} reads shown"
+    ax.set_title(title, fontsize=10)
+    ax.legend(
+        handles=[matplotlib.patches.Patch(color=c, label=b) for b, c in _BASE_COLOURS.items()]
+        + [matplotlib.patches.Patch(color="#555555", label="gap")],
+        fontsize=7, loc="upper right", ncol=5,
+    )
+
+
+def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
+                   alignment: dict | None = None) -> None:
+    """Softclips at both breakpoints, bridging pair inserts and, when the
+    junction reads were aligned, the alignment around the junction, with the
+    evidence summarised in the title.
+    """
+    if alignment is None:
+        fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+        axes = axes.reshape(-1)
     for ax, w in zip(axes, windows):
         _draw_softclip_panel(ax, w["title"], w["clips"], w["predicted"], w["refined"])
     _draw_insert_panel(axes[2], panel)
+    if alignment is not None:
+        _draw_alignment_panel(axes[3], alignment)
     fig.suptitle(_evidence_text(ev), fontsize=11, y=1.02)
     _save(output_path)
 
@@ -677,9 +789,9 @@ def _pair_evidence(
     k1, k2 = (locus, b1), (locus, b2)
     w1, w2 = windows[k1], windows[k2]
     junctions = _split_junctions(windows, k1, k2)
-    ends, refined_by, at_junction = (None, None), None, 0
+    ends, refined_by, split_reads = (None, None), None, []
     if junctions:
-        (p1, s1, p2, s2), at_junction = junctions.most_common(1)[0]
+        (p1, s1, p2, s2), split_reads = max(junctions.items(), key=lambda j: len(j[1]))
         ends, refined_by = ((p1, s1), (p2, s2)), "split_reads"
     elif w1["clips"] and w2["clips"]:
         ends, refined_by = (_top_clip(w1["clips"]), _top_clip(w2["clips"])), "softclips"
@@ -705,8 +817,8 @@ def _pair_evidence(
         "refined_by": refined_by,
         "sv_type": chosen or panel["sv_type"] or geometry_type,
         "size": size,
-        "split_reads": sum(junctions.values()),
-        "split_reads_at_junction": at_junction,
+        "split_reads": sum(len(v) for v in junctions.values()),
+        "split_reads_at_junction": len(split_reads),
         "junction_reads": (None if junction_counts is None
                            else junction_counts.get((locus, b1, b2), 0)),
         "softclips_bkp1": len(w1["clips"]),
@@ -716,8 +828,51 @@ def _pair_evidence(
                              if pairs else None),
         "insert_median": float(np.median([p.insert for p in pairs])) if pairs else None,
         "insert_expected": panel["expected"],
+        # kept for the junction alignment, not written to the summary
+        "_ends": ends if refined_by else None,
+        "_split_reads": split_reads,
     }
     return ev, panel
+
+
+def _junction_alignment(ev: dict, matches: list, k1: tuple, k2: tuple, fasta,
+                        prefix: str) -> dict | None:
+    """Align the junction reads and the split reads of one breakpoint pair with
+    MAFFT, write the alignment, and add its statistics to *ev*.
+    """
+    reads: dict[str, str] = {}
+    split_offsets: dict[str, int] = {}
+    for (name, is_read1), seq, offset in ev["_split_reads"]:
+        read_id = f"{name}/{1 if is_read1 else 2}"
+        reads[read_id] = seq
+        split_offsets[read_id] = offset
+    known = set(reads.values())
+    for m in matches:
+        if set(m["breakpoints"]) == {k1, k2} and m["sequence"] not in known:
+            name = m["read_name"]
+            while name in reads:
+                name += "'"
+            reads[name] = m["sequence"]
+            known.add(m["sequence"])
+    if len(reads) < 2:
+        return None
+
+    expected = (expected_junction(fasta, ev["chrom"], ev["_ends"])
+                if fasta is not None and ev["_ends"] else None)
+    alignment = align_junction(reads, split_offsets, expected)
+    ev.update(alignment["stats"])
+
+    with open(f"{prefix}_junction_alignment.txt", "w") as fh:
+        fh.writelines(f"# {line}\n" for line in _evidence_text(ev).splitlines())
+        fh.write(f"# consensus: {alignment['consensus']}\n")
+        fh.write(alignment["text"])
+    with open(f"{prefix}_junction_msa.fasta", "w") as fh:
+        consensus_row = "".join(symbol or "-" for symbol, _, _ in alignment["columns"])
+        fh.write(f">consensus\n{consensus_row}\n")
+        for name, row in alignment["aligned"].items():
+            fh.write(f">{name}\n{row}\n")
+    print(f"Saved {prefix}_junction_alignment.txt")
+    return alignment
 
 
 # ---------------------------------------------------------------------------
@@ -797,6 +952,12 @@ def run(args) -> None:
     pooled_panels: dict = {}
     pooled_windows: dict = {}
     output_dir = os.path.dirname(args.output) or "."
+    reference = getattr(args, "reference", None) or args.blast
+    fasta = pysam.FastaFile(reference) if reference else None
+    align_reads = args.junction and args.plot_evidence
+    if align_reads and not mafft_available():
+        print("Warning: mafft not found; junction reads will not be aligned.")
+        align_reads = False
 
     # ------------------------------------------------------------------
     # Per-BAM processing
@@ -849,6 +1010,7 @@ def run(args) -> None:
         # ---- Junction search ----
         locus_pairs = _locus_pairs(windows, canonical_pairs)
         junction_counts = None
+        matches: list = []
         if args.junction:
             print(f"Searching junction reads for {bam_name}...")
             matches, junction_counts = _junction_search(bam_file, windows, locus_pairs)
@@ -865,8 +1027,16 @@ def run(args) -> None:
                 bam_name, locus, b1, b2, windows, bridges, junction_counts,
                 library_median, library_mad, args.sv_type,
             )
+            alignment = None
+            if fasta is not None and ev["_ends"]:
+                ev["microhomology"] = microhomology(fasta, ev["chrom"], ev["_ends"])
+            if align_reads:
+                alignment = _junction_alignment(
+                    ev, matches, (locus, b1), (locus, b2), fasta,
+                    f"{args.output}_{bam_name}_{locus}_{b1}-{b2}",
+                )
             evidence_rows.append(ev)
-            pair_results.append((locus, b1, b2, ev, panel))
+            pair_results.append((locus, b1, b2, ev, panel, alignment))
             for bkp, n in ((b1, 1), (b2, 2)):
                 if ev[f"bkp{n}_refined"] is not None:
                     refined_by_key.setdefault((locus, bkp), (
@@ -882,7 +1052,7 @@ def run(args) -> None:
         }
 
         if canonical_pairs:
-            panels = [panel for *_, panel in pair_results]
+            panels = [panel for *_, panel, _ in pair_results]
         else:
             panels = []
             for (locus, bkp), pairs in pairs_by_key.items():
@@ -903,10 +1073,11 @@ def run(args) -> None:
             _plot_softclip_positions(list(window_plots.values()),
                                      f"{args.output}_{bam_name}_softclip_dist.png")
         if args.plot_evidence:
-            for locus, b1, b2, ev, panel in pair_results:
+            for locus, b1, b2, ev, panel, alignment in pair_results:
                 _plot_evidence(
                     ev, (window_plots[(locus, b1)], window_plots[(locus, b2)]), panel,
                     f"{args.output}_{bam_name}_{locus}_{b1}-{b2}_evidence.png",
+                    alignment,
                 )
 
         # Pooled accumulation
@@ -972,10 +1143,13 @@ def run(args) -> None:
         "bkp1_refined", "bkp1_side", "bkp2_refined", "bkp2_side", "refined_by",
         "sv_type", "size", "split_reads", "split_reads_at_junction", "junction_reads",
         "softclips_bkp1", "softclips_bkp2", "bridging_pairs", "pair_orientation",
-        "insert_median", "insert_expected",
+        "insert_median", "insert_expected", "microhomology", "aligned_reads",
+        "consensus_length", "junction_depth", "junction_agreement", "inserted_bases",
+        "expected_identity",
     ]
     pd.DataFrame(evidence_rows, columns=evidence_columns).astype(
-        {c: "Int64" for c in ("bkp1_refined", "bkp2_refined", "size", "junction_reads")}
+        {c: "Int64" for c in ("bkp1_refined", "bkp2_refined", "size", "junction_reads",
+                              "aligned_reads", "consensus_length", "junction_depth")}
     ).to_csv(evidence_output, sep="\t", index=False, na_rep="NA", float_format="%.0f")
     print(f"\nBridging pairs saved to {bridges_output}")
     print(f"Insert size summary saved to {summary_output}")

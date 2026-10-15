@@ -258,6 +258,14 @@ For each pair of breakpoints (the `--pairs`, or every pair within a locus), the 
 
 `--plot-evidence` draws one figure per sample and breakpoint pair: the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
+#### Junction sequence
+
+With `--junction` and `--plot-evidence`, and [MAFFT](https://mafft.cbrc.jp/alignment/software/) installed, the junction reads and the split reads of each breakpoint pair are aligned with MAFFT (L-INS-i) and their consensus reconstructs the junction sequence. The junction is placed from the split reads, whose clip boundary in each read is known.
+
+Given a reference (`--reference`, or the `--blast` one), the reads are added onto the junction expected from the refined breakpoints (`--addfragments`), which gives the bases inserted at the junction, the identity of the consensus with the expected junction, and the microhomology (bases found on both sides, which leave the exact breakpoint ambiguous within them). Long inserted sequences show only as far as the reads cover them.
+
+The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn as a fourth panel of the evidence figure.
+
 All outputs are written to a `junctions/` subdirectory inside the existing `ArDuRun-*` output folder.
 
 ```bash
@@ -283,7 +291,8 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `--sv-type` | SV type used for the expected insert of bridging pairs: `auto`, `deletion` or `duplication`. `auto` picks the type the pair orientations support (FR: deletion, RF: tandem duplication), which assumes the SV is longer than the library insert. | `auto` |
 | `--plot-insert` | Plot insert-size distributions. | `False` |
 | `--plot-softclip` | Plot softclip pileup per breakpoint, left and right clips stacked, with predicted and refined positions. | `False` |
-| `--plot-evidence` | Plot softclips at both breakpoints and the bridging pair inserts of each breakpoint pair, with the evidence summary. | `False` |
+| `--plot-evidence` | Plot softclips at both breakpoints and the bridging pair inserts of each breakpoint pair, with the evidence summary. With `--junction` and MAFFT, also align the junction reads. | `False` |
+| `--reference` | Indexed reference FASTA for the expected junction and microhomology. Defaults to the `--blast` reference. | `None` |
 | `--plot-mode` | `per-bam`, `pooled`, or `both`. | `per-bam` |
 
 ### Output files
@@ -291,7 +300,9 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | File | Description |
 |---|---|
 | `*_bridging_pairs.tsv` | Discordant read pairs with one mate in each of two breakpoint windows of the same locus, each pair listed once. Contains BAM file, locus, read name, positions of both mates, insert size, orientation, proper pair flag and breakpoint bridge. |
-| `*_junction_summary.tsv` | One row per sample and breakpoint pair: predicted and refined breakpoints (with clip side and source), SV type and size, split reads, junction reads, softclips per breakpoint, bridging pairs with orientation, median and expected insert. |
+| `*_junction_summary.tsv` | One row per sample and breakpoint pair: predicted and refined breakpoints (with clip side and source), SV type and size, split reads, junction reads, softclips per breakpoint, bridging pairs with orientation, median and expected insert; with a reference, the microhomology; with the alignment, reads aligned, consensus length, depth and lowest agreement around the junction, inserted bases and identity with the expected junction. |
+| `*_{sample}_{locus}_1-2_junction_alignment.txt` | Junction and split reads stacked under their consensus, with the junction marked. |
+| `*_{sample}_{locus}_1-2_junction_msa.fasta` | The MAFFT alignment, with the consensus (and the expected junction with a reference). |
 | `*_insert_summary.tsv` | Per BAM (and `pooled`): the library insert (median, quartiles and MAD of proper FR pairs), then n, median and quartiles of the bridging pairs per breakpoint pair (with `--pairs`) or of the discordant pairs per breakpoint, by orientation, with the SV type and expected insert. |
 | `*_soft_clipped_sequences.fasta` | All extracted soft-clipped sequences. |
 | `*.tsv` | Per-read softclip details (position, CIGAR, mate position, insert size). |
