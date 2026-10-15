@@ -79,7 +79,7 @@ The normalised depth of coverage rises from ~1 to ~2.2 at breakpoint 1 (AgamP4_2
 mkdir -p ArDuRun-ArduExampleRun-DATE/junctions
 ardu junctions -b bamlist.txt -i ArDuRun-ArduExampleRun-DATE \
   -s 30 -e 1000 --pairs 1-2 --junction \
-  --blast AgamP4_2R_1-3800000.fa --plot-insert --plot-softclip --plot-evidence \
+  --blast AgamP4_2R_1-3800000.fa --plot-insert --plot-softclip --plot-evidence --report \
   -o ArDuRun-ArduExampleRun-DATE/junctions/JunctionTest
 ```
 
@@ -264,6 +264,8 @@ For each pair, the evidence is gathered in `*_junction_summary.tsv`:
 
 With `--plot-evidence`, a locus with three breakpoints or more also gets an **overview** figure: the reference segments with their depth relative to the flanks, each joined pair as an arc labelled with its SV type and support, and one possible haplotype built from them. Joined deletions and tandem duplications are applied outermost first; an event nested inside a duplicated segment is placed on one of its copies chosen at random (noted on the figure), or, for a deletion whose segment is less covered than the flanks, on both copies. The junction reads alone cannot tell these apart; only the depth can. Junctions that overlap without nesting are shown as arcs but not modelled.
 
+`--report` gathers the same evidence in one PDF per sample and locus, one kind of evidence per page for every joined pair: structure (the overview with three breakpoints or more), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
+
 `--plot-evidence` also draws one figure per sample and joined breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction, its sequence and the segment depths; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
 #### Junction sequence
@@ -303,6 +305,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `--min-support` | Split reads plus bridging pairs (junction reads without split reads) needed to join two breakpoints and call an SV. | `2` |
 | `--segment-flank` | Length of the flanks outside the first and last breakpoints that segment depths are compared with (bp). | `10000` |
 | `--reference` | Indexed reference FASTA for the expected junction and microhomology. Defaults to the `--blast` reference. | `None` |
+| `--report` | Write one PDF per sample and locus with one kind of evidence per page (structure, softclips, insert sizes, junction read alignment, junction consensus). | `False` |
 | `--plot-mode` | `per-bam`, `pooled`, or `both`. | `per-bam` |
 
 ### Output files
@@ -322,6 +325,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `{sample}_{locus}_1-2_junction_reads.fasta` | Reads spanning the junction (if `--junction` used). |
 | `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileups, left and right clips stacked, with predicted and refined breakpoint positions. |
+| `*_{sample}_{locus}_report.pdf` | Evidence report, one page per kind of evidence (if `--report` used). |
 | `*_{sample}_{locus}_overview.png` | For a locus with three breakpoints or more: segments, joined pairs and one possible haplotype (if `--plot-evidence` used). |
 | `*_{sample}_{locus}_1-2_evidence.png` | Softclips at both breakpoints and bridging pair inserts, with the SV call and its evidence (if `--plot-evidence` used). |
 

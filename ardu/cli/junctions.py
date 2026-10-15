@@ -108,6 +108,11 @@ def register(subparsers) -> None:
     parser.add_argument("--reference", metavar="FASTA",
                         help="Indexed reference FASTA, used for the expected junction "
                              "sequence and microhomology. Defaults to the --blast reference.")
+    parser.add_argument("--report", action="store_true",
+                        help="Write one PDF per sample and locus, one kind of evidence per "
+                             "page for every joined pair: structure, softclips, insert sizes, "
+                             "junction read alignment and junction consensus (the last two "
+                             "with --junction and MAFFT installed).")
     parser.add_argument("--plot-mode",
                         choices=["per-bam", "pooled", "both"],
                         default="per-bam",
@@ -873,31 +878,49 @@ def _draw_structure_panel(ax, ev: dict) -> None:
 _SV_COLOURS = {"deletion": "darkred", "duplication": "navy"}
 
 
-def _plot_overview(bam_name: str, locus, segments: list[dict], joined: list[dict],
-                   output_path: str) -> None:
-    """All the breakpoints of a locus: the reference segments with their depth
-    relative to the flanks, the joined pairs as arcs, and one possible
-    haplotype built from them (:func:`ardu.sv_model.build_model`).
-    """
+def _overview_model(bam_name: str, locus, segments: list[dict], joined: list[dict]) -> tuple:
+    """Breakpoint order, segment depths, haplotype pieces and notes of a locus."""
     order = [int(segments[1]["segment"].split("-")[0])] + [
         int(r["segment"].split("-")[1]) for r in segments[1:-1]
     ]
-    n = len(order)
     depths = [r["relative_depth"] for r in segments]
     events = []
     for ev in joined:
         b1, b2 = map(int, ev["pair"].split("-"))
         i, j = sorted((order.index(b1), order.index(b2)))
         events.append((ev["pair"], ev["sv_type"], i, j))
-    pieces, notes = build_model(n, events, depths,
+    pieces, notes = build_model(len(order), events, depths,
                                 seed=zlib.crc32(f"{bam_name}:{locus}".encode()))
+    return order, depths, pieces, notes
 
+
+def _overview_width(model: tuple) -> float:
+    order, _, pieces, _ = model
+    return sum(1.0 if p["seg"] in (0, len(order)) else 2.0 for p in pieces)
+
+
+def _plot_overview(bam_name: str, locus, segments: list[dict], joined: list[dict],
+                   output_path: str) -> None:
+    """All the breakpoints of a locus; see :func:`_draw_overview`."""
+    model = _overview_model(bam_name, locus, segments, joined)
+    fig, ax = plt.subplots(figsize=(max(10, 1.6 * _overview_width(model)), 5))
+    _draw_overview(ax, bam_name, locus, segments, joined, model)
+    _save(output_path)
+
+
+def _draw_overview(ax, bam_name: str, locus, segments: list[dict], joined: list[dict],
+                   model: tuple) -> None:
+    """The reference segments of a locus with their depth relative to the
+    flanks, the joined pairs as arcs, and one possible haplotype built from
+    them (:func:`ardu.sv_model.build_model`).
+    """
+    order, depths, pieces, notes = model
+    n = len(order)
     palette = plt.get_cmap("tab10")
     colours = [_FLANK_COLOUR] + [palette(k % 10) for k in range(n - 1)] + [_FLANK_COLOUR]
     widths = [1.0] + [2.0] * (n - 1) + [1.0]
     seg_label = ["flank"] + [r["segment"] for r in segments[1:-1]] + ["flank"]
     h, y_ref, y_hap = 0.3, 1.6, 0.0
-    fig, ax = plt.subplots(figsize=(max(10, 1.6 * (sum(widths[p["seg"]] for p in pieces))), 5))
 
     def block(x, k, y, label):
         ax.add_patch(matplotlib.patches.FancyArrow(
@@ -960,7 +983,100 @@ def _plot_overview(bam_name: str, locus, segments: list[dict], joined: list[dict
     ax.axis("off")
     ax.set_title(f"{bam_name} | {locus} {segments[0]['chrom']}: joined breakpoints and one "
                  "possible haplotype (not to scale, depth relative to the flanks)", fontsize=10)
-    _save(output_path)
+
+
+_PAGE_WIDTH = 11.7
+
+
+def _report_page(pdf, fig, title: str, subtitle: str) -> None:
+    fig.suptitle(f"{title}\n{subtitle}", fontsize=11)
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _report_empty_page(pdf, title: str, subtitle: str, message: str) -> None:
+    fig, ax = plt.subplots(figsize=(_PAGE_WIDTH, 2.5))
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10, transform=ax.transAxes)
+    ax.axis("off")
+    _report_page(pdf, fig, title, subtitle)
+
+
+def _write_report(bam_name: str, locus, results: list[tuple], window_plots: dict,
+                  segments: list[dict], output_path: str) -> None:
+    """One PDF per sample and locus with one kind of evidence per page, for
+    every joined pair: the structure (the overview with three breakpoints or
+    more), the softclips at both breakpoints, the bridging pair inserts, the
+    alignment of the junction reads and the junction consensus.
+    """
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    pairs = [(b1, b2, ev, panel, alignment)
+             for b1, b2, ev, panel, alignment in results if ev["joined"]]
+    if not pairs:
+        return
+    n = len(pairs)
+    header = f"{bam_name} | {locus}"
+    calls = "\n".join(_evidence_text(ev).splitlines()[0].split(" | ", 1)[1]
+                       for _, _, ev, _, _ in pairs)
+
+    with PdfPages(output_path) as pdf:
+        # 1. structure
+        if len(segments) >= 4:
+            joined = [ev for _, _, ev, _, _ in pairs]
+            model = _overview_model(bam_name, locus, segments, joined)
+            fig, ax = plt.subplots(figsize=(max(_PAGE_WIDTH, 1.2 * _overview_width(model)), 5.5))
+            _draw_overview(ax, bam_name, locus, segments, joined, model)
+            _report_page(pdf, fig, f"{header}: structure", calls)
+        elif pairs[0][2]["sv_type"] in ("deletion", "duplication"):
+            fig, ax = plt.subplots(figsize=(_PAGE_WIDTH, 3.5))
+            _draw_structure_panel(ax, pairs[0][2])
+            _report_page(pdf, fig, f"{header}: structure", calls)
+        else:
+            _report_empty_page(pdf, f"{header}: structure", calls,
+                               "No schematic: the SV is neither a deletion nor a tandem duplication.")
+
+        # 2. softclips at both breakpoints of each pair
+        fig, axes = plt.subplots(n, 2, figsize=(_PAGE_WIDTH, 3.6 * n), squeeze=False)
+        for row, (b1, b2, _, _, _) in enumerate(pairs):
+            for col, bkp in enumerate((b1, b2)):
+                w = window_plots[(locus, bkp)]
+                _draw_softclip_panel(axes[row][col], f"pair {b1}-{b2}: BKP {bkp}", w["clips"],
+                                     w["predicted"], w["refined"])
+        _report_page(pdf, fig, f"{header}: softclips", calls)
+
+        # 3. bridging pair inserts
+        fig, axes = plt.subplots(n, 1, figsize=(_PAGE_WIDTH, 3.6 * n), squeeze=False)
+        for row, (_, _, _, panel, _) in enumerate(pairs):
+            _draw_insert_panel(axes[row][0], panel)
+        _report_page(pdf, fig, f"{header}: insert sizes", calls)
+
+        # 4. and 5. junction reads alignment and consensus
+        aligned = [(b1, b2, ev, alignment) for b1, b2, ev, _, alignment in pairs if alignment]
+        missing = [f"{b1}-{b2}" for b1, b2, _, _, alignment in pairs if not alignment]
+        if aligned and missing:
+            calls += (f"\nnot aligned (fewer than 2 reads crossing the junction): "
+                      f"pair {', '.join(missing)}")
+        if not aligned:
+            message = ("No junction read alignment: it needs --junction, MAFFT installed and "
+                       "at least 2 reads crossing the junction.")
+            _report_empty_page(pdf, f"{header}: junction reads (MAFFT)", calls, message)
+            _report_empty_page(pdf, f"{header}: junction consensus", calls, message)
+            return
+        fig, axes = plt.subplots(len(aligned), 1, figsize=(_PAGE_WIDTH, 5 * len(aligned)),
+                                 squeeze=False)
+        for row, (b1, b2, _, alignment) in enumerate(aligned):
+            _draw_alignment_panel(axes[row][0], alignment)
+            axes[row][0].set_title(f"pair {b1}-{b2}: " + axes[row][0].get_title(), fontsize=10)
+        _report_page(pdf, fig, f"{header}: junction reads (MAFFT)", calls)
+
+        heights = [0.35 * math.ceil(len(a["consensus"]) / 100) + 1.4 for *_, a in aligned]
+        fig, axes = plt.subplots(len(aligned), 1, figsize=(_PAGE_WIDTH, sum(heights) + 0.5),
+                                 squeeze=False, gridspec_kw={"height_ratios": heights})
+        for row, (b1, b2, ev, alignment) in enumerate(aligned):
+            _draw_sequence_panel(axes[row][0], alignment, ev)
+            axes[row][0].set_title(f"pair {b1}-{b2}: " + axes[row][0].get_title(), fontsize=10)
+        _report_page(pdf, fig, f"{header}: junction consensus", calls)
 
 
 def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
@@ -1278,7 +1394,7 @@ def run(args) -> None:
     output_dir = os.path.dirname(args.output) or "."
     reference = getattr(args, "reference", None) or args.blast
     fasta = pysam.FastaFile(reference) if reference else None
-    align_reads = args.junction and args.plot_evidence
+    align_reads = args.junction and (args.plot_evidence or args.report)
     if align_reads and not mafft_available():
         print("Warning: mafft not found; junction reads will not be aligned.")
         align_reads = False
@@ -1439,6 +1555,18 @@ def run(args) -> None:
                     f"{args.output}_{bam_name}_{locus}_{b1}-{b2}_evidence.png",
                     alignment,
                 )
+
+        if args.report:
+            for locus in dict.fromkeys(k[0] for k in windows):
+                results = [(b1, b2, ev, panel, alignment)
+                           for l, b1, b2, ev, panel, alignment in pair_results if l == locus]
+                for _, _, ev, _, _ in results:
+                    ev["_segments"] = segment_text.get(locus)
+                path = f"{args.output}_{bam_name}_{locus}_report.pdf"
+                _write_report(bam_name, locus, results, window_plots,
+                              [r for r in segments if r["locus"] == locus], path)
+                if any(ev["joined"] for _, _, ev, _, _ in results):
+                    print(f"Saved {path}")
 
         # Pooled accumulation
         if args.plot_mode in ("pooled", "both"):

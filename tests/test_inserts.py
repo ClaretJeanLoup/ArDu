@@ -13,6 +13,7 @@ and 5 split reads at each junction: 2,000 | 2,601 for the deletion and
 from __future__ import annotations
 
 import argparse
+import re
 
 import pandas as pd
 import pysam
@@ -209,3 +210,10 @@ def test_requested_pair_not_joined_gets_no_call(paired):
     assert not row["joined"]
     assert row["support"] == 0
     assert pd.isna(row["sv_type"]) and pd.isna(row["size"]) and pd.isna(row["bkp1_refined"])
+
+
+def test_report_has_one_page_per_kind_of_evidence(paired):
+    _run_with_third_breakpoint(paired, "report", ["--pairs", "1-2", "--report"])
+    for locus in ("del", "dup"):
+        pdf = (paired["dir"] / f"report_sample_{locus}_report.pdf").read_bytes()
+        assert len(re.findall(rb"/Type\s*/Page[^s]", pdf)) == 5
