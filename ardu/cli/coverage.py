@@ -491,7 +491,8 @@ def _format_row(row) -> str:
         covered = str(int(row["coveredbases"])) if row["coveredbases"] != "NA" else "NA"
     except (ValueError, TypeError):
         covered = "NA"
-    norm = _f(row["normalised"], 1)
+    # RCN keeps 4 decimals: one decimal hides differences such as 0.04 against 0.08 (e.g. heteroplasmic deletions)
+    norm = _f(row["normalised"], 4)
     return f"{mean};{sd};{median};{covered};{norm}"
 
 
