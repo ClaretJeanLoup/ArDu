@@ -20,6 +20,8 @@ import pandas as pd
 import pysam
 import seaborn as sns
 
+from ardu.bam import read_pair_info
+
 matplotlib.use("Agg")
 
 
@@ -158,13 +160,10 @@ def _extract_soft_clipped_positions(
             cigar = read.cigarstring
             chrom = read.reference_name
             mate_position = (
-                read.next_reference_start if not read.mate_is_unmapped else None
+                read.next_reference_start + 1 if not read.mate_is_unmapped else None
             )
-            insert_size = (
-                abs(mapping_position - mate_position)
-                if mate_position is not None
-                else None
-            )
+            pair = read_pair_info(read)
+            insert_size = pair.insert if pair is not None else None
 
             # LEFT soft-clip
             if read.cigar[0][0] == 4 and read.cigar[0][1] >= min_clip:

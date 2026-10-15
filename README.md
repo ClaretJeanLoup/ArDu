@@ -241,7 +241,13 @@ Full junction-evidence pipeline. Uses the breakpoints TSV from `ardu coverage` t
 2. Detect bridging read pairs (mates mapping at different breakpoints)
 3. Optionally find spanning reads — single reads whose sequence crosses the junction (using an Aho-Corasick automaton)
 4. Optionally run BLAST on all extracted softclips
-5. Produce insert-size and softclip pileup plots
+5. Summarise and plot the insert size of read pairs, and plot softclip pileups
+
+#### Insert sizes
+
+Pairs are taken from the reads overlapping each breakpoint window (`-e`), keeping primary alignments that pass the mapping quality and flag filters, with the mate on the same chromosome. Each pair is counted once. The insert is the distance between the 5' ends of the two mates (the fragment length for a normal pair), computed from the mate CIGAR (`MC` tag, or `TLEN` without it), and the orientation is FR, RF, FF or RR.
+
+The library insert is the median of the proper FR pairs. A pair is discordant when it is not FR or is more than 4 SD (from the MAD) above the library insert. With `--pairs`, the discordant pairs joining two breakpoints are compared with the insert expected for the SV: `S + L` in FR for a deletion of size `S`, `|L - S|` in RF for a tandem duplication (`L`, the library insert). Bridging pairs need windows wider than the library insert, so use a large `-e` (e.g. 1000).
 
 All outputs are written to a `junctions/` subdirectory inside the existing `ArDuRun-*` output folder.
 
@@ -265,6 +271,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `--pairs` | Restrict analysis to specific breakpoint pairs, e.g. `--pairs 1-2 3-4`. | `None` |
 | `--spanning-reads` | Find reads whose sequence physically spans the breakpoint junction. | `False` |
 | `--spanning-reads-fastq` | Write spanning reads as FASTQ instead of FASTA. | `False` |
+| `--sv-type` | SV type used for the expected insert of bridging pairs: `auto`, `deletion` or `duplication`. `auto` picks the type the pair orientations support (FR: deletion, RF: tandem duplication), which assumes the SV is longer than the library insert. | `auto` |
 | `--plot-insert` | Plot insert-size distributions. | `False` |
 | `--plot-softclip` | Plot softclip pileup per breakpoint with mode and predicted position. | `False` |
 | `--plot-mode` | `per-bam`, `pooled`, or `both`. | `per-bam` |
@@ -273,13 +280,14 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 | File | Description |
 |---|---|
-| `*_bridging_pairs.tsv` | Read pairs where one mate maps near each breakpoint. Contains BAM file, read name, positions, insert size, strand, and breakpoint bridge. |
+| `*_bridging_pairs.tsv` | Discordant read pairs with one mate in each of two breakpoint windows of the same locus, each pair listed once. Contains BAM file, locus, read name, positions of both mates, insert size, orientation, proper pair flag and breakpoint bridge. |
+| `*_insert_summary.tsv` | Per BAM (and `pooled`): the library insert (median, quartiles and MAD of proper FR pairs), then n, median and quartiles of the bridging pairs per breakpoint pair (with `--pairs`) or of the discordant pairs per breakpoint, by orientation, with the SV type and expected insert. |
 | `*_soft_clipped_sequences.fasta` | All extracted soft-clipped sequences. |
 | `*.tsv` | Per-read softclip details (position, CIGAR, mate position, insert size). |
 | `*_BLAST_results.txt` | Raw BLAST output (if `--blast` used). |
 | `*_BLAST_filtered_pairs.txt` | BLAST hits filtered to cross-breakpoint mappings. |
 | `*_{sample}_1-2_junction_reads.fasta` | Reads spanning the junction (if `--spanning-reads` used). |
-| `*_{sample}_insert_dist.png` | Insert-size distribution plots. |
+| `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileup plots with mode and predicted breakpoint positions. |
 
 ---

@@ -23,6 +23,7 @@ import pysam
 
 matplotlib.use("Agg")
 
+from ardu.bam import read_pair_info
 from ardu.junctionlib import (
     build_softclip_automaton,
     find_reads_with_multiple_softclips_aho,
@@ -70,6 +71,12 @@ def register(subparsers) -> None:
                         help="Write junction reads as FASTQ (default: FASTA).")
     parser.add_argument("--plot-insert", action="store_true",
                         help="Plot insert-size distributions.")
+    parser.add_argument("--sv-type", choices=["auto", "deletion", "duplication"],
+                        default="auto",
+                        help="SV type used for the expected insert of bridging pairs. "
+                             "auto picks the type the pair orientations support "
+                             "(FR: deletion, RF: tandem duplication), which assumes "
+                             "the SV is longer than the library insert. Default=auto.")
     parser.add_argument("--plot-softclip", action="store_true",
                         help="Plot softclip position distributions.")
     parser.add_argument("--plot-mode",
@@ -168,15 +175,14 @@ def _extract_softclips(
     fasta_output: str,
     tsv_output: str,
     breakpoint: int,
-    inserts_by_bkp: dict,
-    regions_by_bkp: dict,
-    bridges_writer,
+    pairs: dict,
     softclip_positions_by_bkp: dict,
 ) -> dict[int, list[str]]:
     """Extract softclips and return ``{bkp: [clip_sequence, ...]}``.
 
-    Also writes to the shared FASTA / TSV outputs, appends insert sizes,
-    records softclip positions, and logs bridging read pairs.
+    Also writes to the shared FASTA / TSV outputs, records softclip positions,
+    and stores in *pairs* ``{read_name: (read_start, PairInfo)}`` for every
+    read pair with a mate in the window.
     """
     softclips_by_bkp: dict[int, list[str]] = {breakpoint: []}
 
@@ -199,16 +205,10 @@ def _extract_softclips(
                 if not read.mate_is_unmapped
                 else None
             )
-            insert_size = (
-                abs(mapping_position - mate_position)
-                if mate_position is not None
-                and read.reference_name == read.next_reference_name
-                else None
-            )
-
-            inserts_by_bkp.setdefault(breakpoint, [])
-            if insert_size is not None:
-                inserts_by_bkp[breakpoint].append(insert_size)
+            pair = read_pair_info(read)
+            if pair is not None:
+                pairs[read.query_name] = (read.reference_start, pair)
+            insert_size = pair.insert if pair is not None else None
 
             # LEFT softclip
             if read.cigar[0][0] == 4 and read.cigar[0][1] >= min_clip:
@@ -245,100 +245,166 @@ def _extract_softclips(
                     clip_position
                 )
 
-            # Bridging read detection
-            if (
-                bridges_writer
-                and mate_position is not None
-                and read.reference_name == read.next_reference_name
-            ):
-                for target_bkp, (t_chrom, t_start, t_end) in regions_by_bkp.items():
-                    if target_bkp == breakpoint:
-                        continue
-                    if t_start <= mate_position <= t_end:
-                        bridges_writer.write(
-                            f"{read.query_name}\t{read.query_name}\t"
-                            f"{chrom}:{mapping_position}\t{chrom}:{mate_position}\t"
-                            f"{insert_size}\t{breakpoint}-{target_bkp}\n"
-                        )
-                        break
-
     return softclips_by_bkp
+
+
+# ---------------------------------------------------------------------------
+# Insert sizes
+# ---------------------------------------------------------------------------
+
+# Pairs further apart than library median + _DISCORDANT_SD * sd are discordant
+_DISCORDANT_SD = 4
+_MAD_TO_SD = 1.4826
+
+
+def _median_mad(values: list[int]) -> tuple[float | None, float | None]:
+    if not values:
+        return None, None
+    a = np.asarray(values, dtype=float)
+    median = float(np.median(a))
+    return median, float(np.median(np.abs(a - median)))
+
+
+def _library_inserts(pairs_by_key: dict) -> list[int]:
+    """Inserts of the proper FR pairs over all windows, each pair counted once."""
+    seen: dict[str, int] = {}
+    for pairs in pairs_by_key.values():
+        for name, (_, pair) in pairs.items():
+            if pair.proper and pair.orientation == "FR":
+                seen[name] = pair.insert
+    return list(seen.values())
+
+
+def _is_discordant(pair, library_median: float | None, library_mad: float | None) -> bool:
+    if pair.orientation != "FR":
+        return True
+    if library_median is None:
+        return not pair.proper
+    return pair.insert > library_median + _DISCORDANT_SD * _MAD_TO_SD * library_mad
+
+
+def _bridging_pairs(pairs_by_key: dict, regions_by_key: dict,
+                    library_median, library_mad) -> dict:
+    """Discordant pairs with one mate in a breakpoint window and the other in
+    another window of the same locus, as
+    ``{(locus, b1, b2): {read_name: (read_start, PairInfo)}}`` with ``b1 < b2``.
+    A pair seen from both windows is kept once. Concordant pairs are left out,
+    since they bridge any two breakpoints closer than the library insert.
+    """
+    bridges: dict = {}
+    for (locus, bkp), pairs in pairs_by_key.items():
+        for (t_locus, t_bkp), (_, t_start, t_end) in regions_by_key.items():
+            if t_locus != locus or t_bkp == bkp:
+                continue
+            key = (locus, *_canonical_pair_key(bkp, t_bkp))
+            for name, (read_start, pair) in pairs.items():
+                if (pair.mate_end > t_start and pair.mate_start < t_end
+                        and _is_discordant(pair, library_median, library_mad)):
+                    bridges.setdefault(key, {})[name] = (read_start, pair)
+    return bridges
+
+
+def _finish_panel(panel: dict, library_median, library_mad, sv_type: str) -> None:
+    """Set the SV type and expected insert of a bridging *panel*.
+
+    A deletion of size S joins two mates S + L apart (L, the library insert),
+    in FR. A tandem duplication joins the end of the copy back to its start, so
+    the mates map |L - S| apart in RF. With *sv_type* ``auto``, the type is the
+    one the bridging pairs support most, which assumes S > L.
+    """
+    panel["library_median"] = library_median
+    panel["sv_type"] = None
+    panel["expected"] = None
+    if panel["class"] != "bridging" or library_median is None:
+        return
+    if sv_type == "auto":
+        rf = sum(p.orientation == "RF" for p in panel["pairs"])
+        fr = sum(p.orientation == "FR" for p in panel["pairs"])
+        sv_type = "duplication" if rf > fr else "deletion" if fr else None
+    if sv_type is None:
+        return
+    panel["sv_type"] = sv_type
+    size = panel["size"]
+    panel["expected"] = (
+        size + library_median if sv_type == "deletion" else abs(library_median - size)
+    )
+
+
+def _summary_rows(bam_name: str, library: list[int], library_mad, panels: list[dict]) -> list[dict]:
+    def stats(values):
+        a = np.asarray(values, dtype=float)
+        return dict(n=len(a), median=np.median(a), q1=np.percentile(a, 25),
+                    q3=np.percentile(a, 75))
+
+    base = dict(bam=bam_name, sv_type=None, expected=None, mad=None)
+    rows = []
+    if library:
+        rows.append({**base, "locus": None, "panel": "all", "class": "library",
+                     "orientation": "FR", **stats(library), "mad": library_mad})
+    for panel in panels:
+        info = {**base, "locus": panel["locus"], "panel": panel["panel"],
+                "class": panel["class"], "sv_type": panel["sv_type"],
+                "expected": panel["expected"]}
+        by_orientation: dict[str, list[int]] = {}
+        for p in panel["pairs"]:
+            by_orientation.setdefault(p.orientation, []).append(p.insert)
+        if not by_orientation:
+            rows.append({**info, "orientation": None, "n": 0})
+        for orientation in sorted(by_orientation):
+            rows.append({**info, "orientation": orientation,
+                         **stats(by_orientation[orientation])})
+    return rows
 
 
 # ---------------------------------------------------------------------------
 # Plot helpers
 # ---------------------------------------------------------------------------
 
-def _plot_insert_sizes(
-    inserts_by_pair: dict,
-    output_path: str,
-    bkp_to_expected_pos: dict | None = None,
-    library_insert: int = 500,
-) -> None:
-    """Plot insert-size distributions per breakpoint pair.
+_ORIENTATION_COLOURS = {"FR": "steelblue", "RF": "darkorange", "FF": "seagreen", "RR": "mediumpurple"}
 
-    When *bkp_to_expected_pos* is provided, the expected bridging insert size
-    is computed from the distance between the two breakpoints.  Inserts beyond
-    (duplication_size + library_insert + 10% of duplication_size) are treated
-    as likely misalignments: they are excluded from the plot but counted and
-    reported in the panel title.  A vertical line marks the expected insert.
+
+def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
+    """Plot the insert sizes of each panel, stacked by pair orientation.
+
+    Bridging panels (one per breakpoint pair) show the pairs joining the two
+    breakpoints, with a red line at the insert expected for the SV type.
+    Discordant panels (one per breakpoint) show the discordant pairs with a
+    mate in the window. The library insert is given in the title.
     """
-    num = max(1, len(inserts_by_pair))
+    num = max(1, len(panels))
     cols = min(num, 3)
     rows = math.ceil(num / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
     axes = np.array(axes).reshape(-1)
 
-    for ax, pair_key in zip(axes, inserts_by_pair):
-        data = inserts_by_pair[pair_key]
-        if not data:
+    for ax, panel in zip(axes, panels):
+        if not panel["pairs"]:
             ax.axis("off")
             continue
-
-        # Compute expected insert and plausibility cap from breakpoint positions
-        expected_insert = None
-        max_plausible = None
-        if bkp_to_expected_pos and len(pair_key) == 2:
-            b1, b2 = pair_key
-            pos1 = bkp_to_expected_pos.get(b1)
-            pos2 = bkp_to_expected_pos.get(b2)
-            if pos1 and pos2:
-                dup_size = abs(pos2 - pos1)
-                tolerance = dup_size * 0.10
-                expected_insert = dup_size + library_insert
-                max_plausible = expected_insert + tolerance
-
-        # Split data into plausible and outliers
-        if max_plausible is not None:
-            plausible = [x for x in data if x <= max_plausible]
-            outliers = [x for x in data if x > max_plausible]
-        else:
-            plausible = data
-            outliers = []
-
-        if not plausible:
-            ax.axis("off")
-            continue
-
+        inserts = [p.insert for p in panel["pairs"]]
+        bins = np.histogram_bin_edges(
+            inserts, bins=min(100, max(10, int(np.sqrt(len(inserts)))))
+        )
+        orientations = [o for o in _ORIENTATION_COLOURS
+                        if any(p.orientation == o for p in panel["pairs"])]
         ax.hist(
-            plausible,
-            bins=min(100, max(10, int(np.sqrt(len(plausible))))),
-            edgecolor="black",
-            color="steelblue",
-            label=f"n={len(plausible)}",
+            [[p.insert for p in panel["pairs"] if p.orientation == o] for o in orientations],
+            bins=bins, stacked=True, edgecolor="black",
+            color=[_ORIENTATION_COLOURS[o] for o in orientations],
+            label=[f"{o} (n={sum(p.orientation == o for p in panel['pairs'])})"
+                   for o in orientations],
         )
         ax.set_yscale("log")
 
-        if expected_insert is not None:
+        if panel["expected"] is not None:
             ax.axvline(
-                expected_insert, color="red", linestyle="--", linewidth=1.5,
-                label=f"expected: {expected_insert:,.0f} bp",
+                panel["expected"], color="red", linestyle="--", linewidth=1.5,
+                label=f"expected {panel['sv_type']}: {panel['expected']:,.0f} bp",
             )
 
-        pair_label = "-".join(map(str, pair_key))
-        title = f"Pair {pair_label}"
-        if outliers:
-            title += f" ({len(outliers)} outliers excluded)"
+        title = f"{panel['locus']} | BKP {panel['panel']} ({panel['class']} pairs)"
+        if panel["library_median"] is not None:
+            title += f"\nlibrary insert {panel['library_median']:,.0f} bp"
         ax.set_title(title, fontsize=10)
         ax.set_xlabel("Insert size (bp)", fontsize=9)
         ax.set_ylabel("Count (log)", fontsize=9)
@@ -348,7 +414,7 @@ def _plot_insert_sizes(
         ax.tick_params(axis="x", labelrotation=30, labelsize=8)
         ax.legend(fontsize=8)
 
-    for ax in axes[len(inserts_by_pair):]:
+    for ax in axes[len(panels):]:
         ax.axis("off")
 
     plt.tight_layout()
@@ -475,6 +541,7 @@ def run(args) -> None:
     tsv_output = f"{args.output}.tsv"
     blast_output = f"{args.output}_BLAST_results.txt"
     bridges_output = f"{args.output}_bridging_pairs.tsv"
+    summary_output = f"{args.output}_insert_summary.tsv"
 
     for path in (fasta_output, tsv_output):
         if os.path.exists(path):
@@ -544,9 +611,12 @@ def run(args) -> None:
             "Clipping_end\tCIGAR\tMate_position\tInsert_size\tRegion\tBreakpoint\n"
         )
     with open(bridges_output, "w") as bf:
-        bf.write("read_name\tmate_name\tread_pos\tmate_pos\tinsert_size\tbreakpoint_bridge\n")
+        bf.write("bam_file\tlocus\tread_name\tread_pos\tmate_pos\tinsert_size\t"
+                 "orientation\tproper_pair\tbreakpoint_bridge\n")
 
-    pooled_inserts_by_pair: dict = {}
+    summary_rows: list[dict] = []
+    pooled_library: list[int] = []
+    pooled_panels: dict = {}
     pooled_softclip_by_pair: dict = {}
 
     # ------------------------------------------------------------------
@@ -558,7 +628,11 @@ def run(args) -> None:
 
         softclips_by_bkp: dict[int, list[str]] = {}
         softclip_positions_by_bkp: dict[int, list[int]] = {}
-        inserts_by_bkp: dict[int, list[int]] = {}
+        # Breakpoint numbers restart for each sample and locus, so the insert
+        # analysis keys its windows by (locus, breakpoint) within this BAM.
+        pairs_by_key: dict[tuple, dict] = {}
+        regions_by_key: dict[tuple, tuple] = {}
+        positions_by_key: dict[tuple, int] = {}
 
         bkp_subset = breakpoints_df[breakpoints_df["bam_file"] == bam_basename]
 
@@ -566,30 +640,79 @@ def run(args) -> None:
             bkp = row["breakpoint_number"]
             pos = row["position"]
             region = (row["chromosome"], pos - args.extension, pos + args.extension)
+            key = (row.get("locus", ""), bkp)
+            regions_by_key[key] = region
+            positions_by_key[key] = pos
 
-            with open(bridges_output, "a") as bridges_fh:
-                bkp_clips = _extract_softclips(
-                    bam_file, region, args.size,
-                    fasta_output, tsv_output, bkp,
-                    inserts_by_bkp, regions_by_bkp,
-                    bridges_fh, softclip_positions_by_bkp,
-                )
+            bkp_clips = _extract_softclips(
+                bam_file, region, args.size,
+                fasta_output, tsv_output, bkp,
+                pairs_by_key.setdefault(key, {}), softclip_positions_by_bkp,
+            )
             softclips_by_bkp.setdefault(bkp, []).extend(bkp_clips.get(bkp, []))
+
+        # ---- Insert sizes ----
+        library = _library_inserts(pairs_by_key)
+        library_median, library_mad = _median_mad(library)
+        if library_median is None:
+            print(f"No proper FR pairs in the windows of {bam_name}; "
+                  "discordant pairs are those not flagged proper by the aligner.")
+        elif 2 * args.extension < library_median:
+            print(f"Warning: windows of {2 * args.extension} bp are shorter than the "
+                  f"library insert ({library_median:,.0f} bp) of {bam_name}; few pairs "
+                  "will bridge two breakpoints. Consider a larger -e.")
+
+        bridges = _bridging_pairs(pairs_by_key, regions_by_key, library_median, library_mad)
+        with open(bridges_output, "a") as bf:
+            for (locus, b1, b2), pairs in bridges.items():
+                chrom = regions_by_key[(locus, b1)][0]
+                for name, (read_start, pair) in pairs.items():
+                    bf.write(
+                        f"{bam_basename}\t{locus}\t{name}\t{chrom}:{read_start + 1}\t"
+                        f"{chrom}:{pair.mate_start + 1}\t{pair.insert}\t"
+                        f"{pair.orientation}\t{pair.proper}\t{b1}-{b2}\n"
+                    )
+
+        panels: list[dict] = []
+        if canonical_pairs:
+            for locus in dict.fromkeys(locus for locus, _ in pairs_by_key):
+                for b1, b2 in canonical_pairs:
+                    if (locus, b1) not in positions_by_key or (locus, b2) not in positions_by_key:
+                        continue
+                    panels.append({
+                        "locus": locus, "panel": f"{b1}-{b2}", "class": "bridging",
+                        "pairs": [p for _, p in bridges.get((locus, b1, b2), {}).values()],
+                        "size": abs(positions_by_key[(locus, b2)] - positions_by_key[(locus, b1)]),
+                    })
+        else:
+            for (locus, bkp), pairs in pairs_by_key.items():
+                panels.append({
+                    "locus": locus, "panel": str(bkp), "class": "discordant",
+                    "pairs": [p for _, p in pairs.values()
+                              if _is_discordant(p, library_median, library_mad)],
+                    "size": None,
+                })
+        for panel in panels:
+            _finish_panel(panel, library_median, library_mad, args.sv_type)
+        summary_rows.extend(_summary_rows(bam_name, library, library_mad, panels))
 
         # Pooled accumulation
         if args.plot_mode in ("pooled", "both"):
+            pooled_library.extend(library)
+            for panel in panels:
+                pooled = pooled_panels.setdefault(
+                    (panel["locus"], panel["panel"]),
+                    {**panel, "pairs": [], "sizes": []},
+                )
+                pooled["pairs"].extend(panel["pairs"])
+                pooled["sizes"].append(panel["size"])
             if canonical_pairs:
                 for key in canonical_pairs:
                     b1, b2 = key
-                    pooled_inserts_by_pair.setdefault(key, [])
-                    pooled_inserts_by_pair[key].extend(inserts_by_bkp.get(b1, []))
-                    pooled_inserts_by_pair[key].extend(inserts_by_bkp.get(b2, []))
                     pooled_softclip_by_pair.setdefault(key, [])
                     pooled_softclip_by_pair[key].extend(softclip_positions_by_bkp.get(b1, []))
                     pooled_softclip_by_pair[key].extend(softclip_positions_by_bkp.get(b2, []))
             else:
-                for bkp, sizes in inserts_by_bkp.items():
-                    pooled_inserts_by_pair.setdefault((bkp,), []).extend(sizes)
                 for bkp, poss in softclip_positions_by_bkp.items():
                     pooled_softclip_by_pair.setdefault((bkp,), []).extend(poss)
 
@@ -648,19 +771,8 @@ def run(args) -> None:
                 write_junction_reads_fasta(matches, output_dir, bam_name)
 
         # ---- Per-BAM plots ----
-        if args.plot_insert and args.plot_mode in ("per-bam", "both"):
-            if canonical_pairs:
-                inserts_by_pair = {
-                    key: inserts_by_bkp.get(key[0], []) + inserts_by_bkp.get(key[1], [])
-                    for key in canonical_pairs
-                }
-            else:
-                inserts_by_pair = {(bkp,): ins for bkp, ins in inserts_by_bkp.items()}
-            _plot_insert_sizes(
-                inserts_by_pair,
-                f"{args.output}_{bam_name}_insert_dist.png",
-                bkp_to_expected_pos=bkp_to_expected_pos,
-            )
+        if args.plot_insert and args.plot_mode in ("per-bam", "both") and panels:
+            _plot_insert_sizes(panels, f"{args.output}_{bam_name}_insert_dist.png")
 
         if args.plot_softclip and args.plot_mode in ("per-bam", "both"):
             _plot_softclip_positions(
@@ -682,14 +794,17 @@ def run(args) -> None:
     # ------------------------------------------------------------------
     # Pooled plots
     # ------------------------------------------------------------------
-    if args.plot_mode in ("pooled", "both"):
-        if args.plot_insert and pooled_inserts_by_pair:
+    if args.plot_mode in ("pooled", "both") and pooled_panels:
+        library_median, library_mad = _median_mad(pooled_library)
+        panels = list(pooled_panels.values())
+        for panel in panels:
+            if panel["class"] == "bridging":
+                panel["size"] = float(np.median(panel["sizes"]))
+            _finish_panel(panel, library_median, library_mad, args.sv_type)
+        summary_rows.extend(_summary_rows("pooled", pooled_library, library_mad, panels))
+        if args.plot_insert:
             print("Plotting pooled insert-size distributions by pair...")
-            _plot_insert_sizes(
-                pooled_inserts_by_pair,
-                f"{args.output}_pooled_insert_dist_by_pair.png",
-                bkp_to_expected_pos=bkp_to_expected_pos,
-            )
+            _plot_insert_sizes(panels, f"{args.output}_pooled_insert_dist_by_pair.png")
         if args.plot_softclip and pooled_softclip_by_pair:
             print("Plotting pooled softclip distributions by pair...")
             _plot_softclip_positions(
@@ -699,5 +814,11 @@ def run(args) -> None:
                 pair_keys=list(pooled_softclip_by_pair.keys()),
             )
 
+    summary_columns = ["bam", "locus", "panel", "class", "orientation", "n", "median",
+                       "q1", "q3", "mad", "sv_type", "expected"]
+    pd.DataFrame(summary_rows, columns=summary_columns).to_csv(
+        summary_output, sep="\t", index=False, na_rep="NA", float_format="%.1f"
+    )
     print(f"\nBridging pairs saved to {bridges_output}")
+    print(f"Insert size summary saved to {summary_output}")
     print("Done.")

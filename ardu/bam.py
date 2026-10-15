@@ -5,9 +5,13 @@ Covers:
     - per-position soft-clip counting
     - per-nucleotide read counts at a single position
     - depth-of-coverage statistics across a set of named loci
+    - insert size and orientation of read pairs
 """
 
 from __future__ import annotations
+
+import re
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -45,6 +49,58 @@ def passes_read_filters(read: pysam.AlignedSegment) -> bool:
         or read.is_qcfail
         or read.is_duplicate
     ) and read.mapping_quality >= MIN_MAPPING_QUALITY
+
+
+class PairInfo(NamedTuple):
+    """Insert size and orientation of a read pair, seen from one of its mates."""
+    insert: int
+    orientation: str        # FR, RF, FF or RR, leftmost 5' end first
+    proper: bool
+    mate_start: int         # 0-based
+    mate_end: int           # 0-based exclusive; approximate when the MC tag is missing
+
+
+_CIGAR_REF_OPS = set("MDN=X")
+
+
+def read_pair_info(read: pysam.AlignedSegment) -> PairInfo | None:
+    """Insert and orientation of the pair *read* belongs to, or ``None``.
+
+    Only primary alignments passing :func:`passes_read_filters`, with a mate
+    mapped on the same chromosome, are kept. The insert is the distance
+    between the 5' ends of the two mates, which is the fragment length for a
+    normal FR pair whatever the aligner. The mate end comes from the MC tag;
+    without it, TLEN is used for the insert and the mate is assumed to have
+    the same length as *read*.
+    """
+    if (
+        not read.is_paired
+        or read.mate_is_unmapped
+        or read.is_supplementary
+        or read.reference_id != read.next_reference_id
+        or not passes_read_filters(read)
+    ):
+        return None
+    mate_start = read.next_reference_start
+    if read.has_tag("MC"):
+        mate_end = mate_start + sum(
+            int(n) for n, op in re.findall(r"(\d+)([MIDNSHP=X])", read.get_tag("MC"))
+            if op in _CIGAR_REF_OPS
+        )
+    else:
+        mate_end = mate_start + read.query_length
+    read_5p = read.reference_end - 1 if read.is_reverse else read.reference_start
+    mate_5p = mate_end - 1 if read.mate_is_reverse else mate_start
+    insert = abs(mate_5p - read_5p) + 1
+    if not read.has_tag("MC") and read.template_length:
+        insert = abs(read.template_length)
+
+    if read.is_reverse == read.mate_is_reverse:
+        orientation = "RR" if read.is_reverse else "FF"
+    else:
+        fwd_5p, rev_5p = (mate_5p, read_5p) if read.is_reverse else (read_5p, mate_5p)
+        orientation = "FR" if fwd_5p <= rev_5p else "RF"
+    return PairInfo(insert, orientation, read.is_proper_pair, mate_start, mate_end)
 
 
 def parse_region(region: str) -> tuple[str, int, int]:
