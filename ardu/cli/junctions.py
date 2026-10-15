@@ -96,6 +96,13 @@ def register(subparsers) -> None:
                              "summary in the title. With --junction and MAFFT installed, "
                              "also align the junction and split reads and add their "
                              "consensus around the junction.")
+    parser.add_argument("--min-support", type=int, default=2,
+                        help="Split reads plus bridging pairs (junction reads without "
+                             "split reads) needed to join two breakpoints and call an SV. "
+                             "Default=2.")
+    parser.add_argument("--segment-flank", type=int, default=10_000,
+                        help="Length of the flanks, outside the first and last breakpoints, "
+                             "that segment depths are compared with. Default=10000.")
     parser.add_argument("--reference", metavar="FASTA",
                         help="Indexed reference FASTA, used for the expected junction "
                              "sequence and microhomology. Defaults to the --blast reference.")
@@ -630,6 +637,8 @@ def _evidence_text(ev: dict) -> str:
         call = (f"{ev['sv_type']} {ev['bkp1_refined']:,}-{ev['bkp2_refined']:,} "
                 f"({ev['size']:,} bp)" if ev["bkp1_refined"] else
                 f"{ev['sv_type']} (~{ev['size']:,} bp)")
+    elif not ev.get("joined", True):
+        call = f"not joined (support {ev['support']})"
     else:
         call = "no SV call"
     junction_reads = "NA" if ev["junction_reads"] is None else ev["junction_reads"]
@@ -847,7 +856,10 @@ def _draw_structure_panel(ax, ev: dict) -> None:
     ax.set_xlim(-1.6, max(x_max, 2 * flank + seg) + 0.3)
     ax.set_ylim(y_sample - 0.7, y_ref + 0.6)
     ax.axis("off")
-    ax.set_title(f"{ev['chrom']}: {sv_type} (not to scale)", fontsize=10)
+    title = f"{ev['chrom']}: {sv_type} (not to scale)"
+    if ev.get("_segments"):
+        title += f"\ndepth relative to flanks, by segment between breakpoints: {ev['_segments']}"
+    ax.set_title(title, fontsize=10)
 
 
 def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
@@ -940,33 +952,44 @@ def _junction_search(bam_file: str, windows: dict, locus_pairs: list) -> tuple[l
 def _pair_evidence(
     bam_name: str, locus, b1: int, b2: int, windows: dict, bridges: dict,
     junction_counts: dict | None, library_median, library_mad, sv_type: str,
+    min_support: int,
 ) -> tuple[dict, dict]:
     """Evidence row and bridging insert panel for breakpoints *b1*, *b2* of *locus*.
 
-    The junction is the one most split reads support, or the top softclip of
-    each window without split reads. The SV type is, in order: --sv-type, the
-    split read geometry, the bridging pair orientation, the softclip geometry.
+    The two breakpoints are joined when split reads and bridging pairs (or
+    junction reads, without split reads) reach *min_support*; only then is an
+    SV called. The junction is the one most split reads support, or the top
+    softclip of each window without split reads. The SV type is, in order:
+    --sv-type, the split read geometry, the bridging pair orientation, the
+    softclip geometry.
     """
     k1, k2 = (locus, b1), (locus, b2)
     w1, w2 = windows[k1], windows[k2]
     junctions = _split_junctions(windows, k1, k2)
+    pairs = [p for _, p in bridges.get((locus, b1, b2), {}).values()]
+    n_split = sum(len(v) for v in junctions.values())
+    n_junction = None if junction_counts is None else junction_counts.get((locus, b1, b2), 0)
+    support = n_split + len(pairs) + ((n_junction or 0) if not n_split else 0)
+    joined = support >= min_support
+
     ends, refined_by, split_reads = (None, None), None, []
-    if junctions:
+    if joined and junctions:
         (p1, s1, p2, s2), split_reads = max(junctions.items(), key=lambda j: len(j[1]))
         ends, refined_by = ((p1, s1), (p2, s2)), "split_reads"
-    elif w1["clips"] and w2["clips"]:
+    elif joined and w1["clips"] and w2["clips"]:
         ends, refined_by = (_top_clip(w1["clips"]), _top_clip(w2["clips"])), "softclips"
     geometry_type, size = _sv_geometry(*ends) if refined_by else (None, None)
 
     chosen = sv_type if sv_type != "auto" else (
         geometry_type if refined_by == "split_reads" else None
     )
-    pairs = [p for _, p in bridges.get((locus, b1, b2), {}).values()]
     panel = {
         "locus": locus, "panel": f"{b1}-{b2}", "class": "bridging", "pairs": pairs,
         "size": size if size is not None else abs(w2["predicted"] - w1["predicted"]),
     }
     _finish_panel(panel, library_median, library_mad, chosen or "auto")
+    if not joined:
+        panel["sv_type"] = panel["expected"] = None
 
     ev = {
         "bam": bam_name, "locus": locus, "pair": f"{b1}-{b2}", "chrom": w1["region"][0],
@@ -976,12 +999,13 @@ def _pair_evidence(
         "bkp2_refined": ends[1][0] if ends[1] else None,
         "bkp2_side": ends[1][1] if ends[1] else None,
         "refined_by": refined_by,
-        "sv_type": chosen or panel["sv_type"] or geometry_type,
+        "joined": joined,
+        "support": support,
+        "sv_type": (chosen or panel["sv_type"] or geometry_type) if joined else None,
         "size": size,
-        "split_reads": sum(len(v) for v in junctions.values()),
+        "split_reads": n_split,
         "split_reads_at_junction": len(split_reads),
-        "junction_reads": (None if junction_counts is None
-                           else junction_counts.get((locus, b1, b2), 0)),
+        "junction_reads": n_junction,
         "softclips_bkp1": len(w1["clips"]),
         "softclips_bkp2": len(w2["clips"]),
         "bridging_pairs": len(pairs),
@@ -1037,6 +1061,41 @@ def _junction_alignment(ev: dict, matches: list, k1: tuple, k2: tuple, fasta,
     return alignment
 
 
+def _segment_depths(bam_file: str, bam_name: str, windows: dict, refined_by_key: dict,
+                    flank: int) -> list[dict]:
+    """Median depth of each segment between consecutive breakpoints of a locus,
+    and of the flanks outside them, relative to the mean of the two flanks.
+    Breakpoints refined by a joined pair are used, else the predicted ones.
+    """
+    rows = []
+    with pysam.AlignmentFile(bam_file, "rb") as bam:
+        for locus in dict.fromkeys(k[0] for k in windows):
+            keys = [k for k in windows if k[0] == locus]
+            chrom = windows[keys[0]]["region"][0]
+            if len(keys) < 2 or any(windows[k]["region"][0] != chrom for k in keys):
+                continue
+            positions = sorted(
+                (refined_by_key[k][0] if k in refined_by_key else windows[k]["predicted"], k[1])
+                for k in keys
+            )
+            bounds = ([max(0, positions[0][0] - flank)] + [p for p, _ in positions]
+                      + [positions[-1][0] + flank])
+            labels = (["flank"] + [f"{a}-{b}" for (_, a), (_, b) in zip(positions, positions[1:])]
+                      + ["flank"])
+            medians = []
+            for start, end in zip(bounds, bounds[1:]):
+                depth = bam_utils.depth_array(bam, chrom, start, end)
+                medians.append(float(np.median(depth)) if len(depth) else float("nan"))
+            base = np.nanmean([medians[0], medians[-1]])
+            for label, start, end, median in zip(labels, bounds, bounds[1:], medians):
+                rows.append({
+                    "bam": bam_name, "locus": locus, "segment": label, "chrom": chrom,
+                    "start": start + 1, "end": end, "median_depth": median,
+                    "relative_depth": round(median / base, 2) if base else None,
+                })
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
@@ -1049,6 +1108,7 @@ def run(args) -> None:
     bridges_output = f"{args.output}_bridging_pairs.tsv"
     summary_output = f"{args.output}_insert_summary.tsv"
     evidence_output = f"{args.output}_junction_summary.tsv"
+    segments_output = f"{args.output}_segments.tsv"
 
     for path in (fasta_output, tsv_output):
         if os.path.exists(path):
@@ -1110,6 +1170,7 @@ def run(args) -> None:
 
     summary_rows: list[dict] = []
     evidence_rows: list[dict] = []
+    segment_rows: list[dict] = []
     pooled_library: list[int] = []
     pooled_panels: dict = {}
     pooled_windows: dict = {}
@@ -1182,13 +1243,19 @@ def run(args) -> None:
                 write_junction_reads_fasta(matches, output_dir, bam_name)
 
         # ---- Evidence per breakpoint pair ----
-        refined_by_key: dict[tuple, tuple] = {}
         pair_results = []
         for locus, b1, b2 in locus_pairs:
             ev, panel = _pair_evidence(
                 bam_name, locus, b1, b2, windows, bridges, junction_counts,
-                library_median, library_mad, args.sv_type,
+                library_median, library_mad, args.sv_type, args.min_support,
             )
+            if not ev["joined"]:
+                if canonical_pairs:
+                    print(f"Warning: {bam_name} {locus} BKP {b1}-{b2} not joined "
+                          f"(support {ev['support']}, --min-support {args.min_support}).")
+                    evidence_rows.append(ev)
+                    pair_results.append((locus, b1, b2, ev, panel, None))
+                continue
             alignment = None
             if fasta is not None and ev["_ends"]:
                 ev["_microhomology"] = microhomology_split(fasta, ev["chrom"], ev["_ends"])
@@ -1201,11 +1268,29 @@ def run(args) -> None:
                 )
             evidence_rows.append(ev)
             pair_results.append((locus, b1, b2, ev, panel, alignment))
+
+        joined = [(locus, b1, b2, ev) for locus, b1, b2, ev, *_ in pair_results if ev["joined"]]
+        if not canonical_pairs:
+            found = " ".join(f"{b1}-{b2}" for _, b1, b2, _ in joined)
+            print(f"Joined breakpoint pairs in {bam_name}: "
+                  + (f"--pairs {found}" if found else "none"))
+        # breakpoints are refined by the joined pairs, split reads first
+        refined_by_key: dict[tuple, tuple] = {}
+        for locus, b1, b2, ev in sorted(joined, key=lambda j: j[3]["refined_by"] != "split_reads"):
             for bkp, n in ((b1, 1), (b2, 2)):
                 if ev[f"bkp{n}_refined"] is not None:
                     refined_by_key.setdefault((locus, bkp), (
                         ev[f"bkp{n}_refined"], ev[f"bkp{n}_side"], ev["refined_by"]
                     ))
+        segments = _segment_depths(bam_file, bam_name, windows, refined_by_key,
+                                   args.segment_flank)
+        segment_rows.extend(segments)
+        segment_text = {
+            locus: " | ".join(f"{r['segment']} {r['relative_depth']:.1f}"
+                              for r in segments if r["locus"] == locus
+                              and r["relative_depth"] is not None)
+            for locus in {r["locus"] for r in segments}
+        }
         for key, w in windows.items():
             if key not in refined_by_key and w["clips"]:
                 refined_by_key[key] = (*_top_clip(w["clips"]), "softclips")
@@ -1238,6 +1323,9 @@ def run(args) -> None:
                                      f"{args.output}_{bam_name}_softclip_dist.png")
         if args.plot_evidence:
             for locus, b1, b2, ev, panel, alignment in pair_results:
+                if not ev["joined"]:
+                    continue
+                ev["_segments"] = segment_text.get(locus)
                 _plot_evidence(
                     ev, (window_plots[(locus, b1)], window_plots[(locus, b2)]), panel,
                     f"{args.output}_{bam_name}_{locus}_{b1}-{b2}_evidence.png",
@@ -1305,7 +1393,7 @@ def run(args) -> None:
     evidence_columns = [
         "bam", "locus", "pair", "chrom", "bkp1_predicted", "bkp2_predicted",
         "bkp1_refined", "bkp1_side", "bkp2_refined", "bkp2_side", "refined_by",
-        "sv_type", "size", "split_reads", "split_reads_at_junction", "junction_reads",
+        "joined", "support", "sv_type", "size", "split_reads", "split_reads_at_junction", "junction_reads",
         "softclips_bkp1", "softclips_bkp2", "bridging_pairs", "pair_orientation",
         "insert_median", "insert_expected", "microhomology", "aligned_reads",
         "consensus_length", "junction_depth", "junction_agreement", "inserted_bases",
@@ -1321,4 +1409,8 @@ def run(args) -> None:
     print(f"\nBridging pairs saved to {bridges_output}")
     print(f"Insert size summary saved to {summary_output}")
     print(f"Junction evidence saved to {evidence_output}")
+    pd.DataFrame(segment_rows, columns=[
+        "bam", "locus", "segment", "chrom", "start", "end", "median_depth", "relative_depth",
+    ]).to_csv(segments_output, sep="\t", index=False, na_rep="NA")
+    print(f"Segment depths saved to {segments_output}")
     print("Done.")

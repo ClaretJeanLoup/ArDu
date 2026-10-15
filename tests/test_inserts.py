@@ -177,3 +177,35 @@ def test_junction_summary(paired):
         assert row["junction_reads"] == "NA" or pd.isna(row["junction_reads"])
     for plot in ("softclip_dist", "del_1-2_evidence", "dup_1-2_evidence"):
         assert (paired["dir"] / f"out_sample_{plot}.png").exists()
+
+
+def _run_with_third_breakpoint(paired, name, extra):
+    """Rerun on the same bam with a breakpoint 3 at 4,000 in ``del``, joined to nothing."""
+    d = paired["dir"]
+    (d / f"{name}_bkp.tsv").write_text(
+        (d / "bkp.tsv").read_text() + "sample\tdel\tchr1\t4000\t3\truptures\n"
+    )
+    parser = argparse.ArgumentParser()
+    junctions.register(parser.add_subparsers())
+    args = parser.parse_args([
+        "junctions", "-b", str(d / "bams.txt"), "-i", str(d / f"{name}_bkp.tsv"),
+        "-o", str(d / name), "-e", "200", *extra,
+    ])
+    args.func(args)
+    return (pd.read_csv(d / f"{name}_junction_summary.tsv", sep="\t"),
+            pd.read_csv(d / f"{name}_segments.tsv", sep="\t"))
+
+
+def test_only_joined_pairs_without_pairs_option(paired):
+    evidence, segments = _run_with_third_breakpoint(paired, "auto", [])
+    assert sorted(zip(evidence["locus"], evidence["pair"])) == [("del", "1-2"), ("dup", "1-2")]
+    assert evidence["joined"].all()
+    assert list(segments.query("locus == 'del'")["segment"]) == ["flank", "1-2", "2-3", "flank"]
+
+
+def test_requested_pair_not_joined_gets_no_call(paired):
+    evidence, _ = _run_with_third_breakpoint(paired, "forced", ["--pairs", "1-3"])
+    row = evidence.set_index(["locus", "pair"]).loc[("del", "1-3")]
+    assert not row["joined"]
+    assert row["support"] == 0
+    assert pd.isna(row["sv_type"]) and pd.isna(row["size"]) and pd.isna(row["bkp1_refined"])

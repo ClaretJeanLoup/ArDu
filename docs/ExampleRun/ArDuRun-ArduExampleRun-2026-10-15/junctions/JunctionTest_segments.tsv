@@ -1,0 +1,4 @@
+bam	locus	segment	chrom	start	end	median_depth	relative_depth
+Yop16-60	ace-1	flank	AgamP4_2R	3426928	3436927	39.0	1.04
+Yop16-60	ace-1	1-2	AgamP4_2R	3436928	3639835	76.0	2.03
+Yop16-60	ace-1	flank	AgamP4_2R	3639836	3649835	36.0	0.96
