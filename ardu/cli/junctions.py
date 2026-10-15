@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 import math
 import os
+import zlib
 import re
 import subprocess
 from collections import Counter
@@ -35,6 +36,7 @@ from ardu.junction_align import (
     mafft_available,
     microhomology_split,
 )
+from ardu.sv_model import build_model
 from ardu.junctionlib import (
     build_softclip_automaton,
     find_reads_with_multiple_softclips_aho,
@@ -718,12 +720,13 @@ def _draw_alignment_panel(ax, alignment: dict, flank: int = 30, max_reads: int =
 
 
 _SEQUENCE_COLOURS = {"left": "steelblue", "right": "darkorange", "inserted": "red",
-                     "microhomology": "mediumpurple", "low support": "#999999"}
+                     "microhomology": "mediumpurple"}
 
 
 def _draw_sequence_panel(ax, alignment: dict, ev: dict, line_length: int = 100) -> None:
     """The consensus sequence, wrapped, coloured by side of the junction, with
-    inserted bases, microhomology and weakly supported (lower case) bases marked.
+    inserted bases and microhomology marked and weakly supported (lower case)
+    bases faded.
     """
     seq, junction = alignment["consensus"], alignment["consensus_junction"]
     inserted = len(alignment["stats"]["inserted_bases"] or "")
@@ -741,9 +744,10 @@ def _draw_sequence_panel(ax, alignment: dict, ev: dict, line_length: int = 100) 
 
     for i, base in enumerate(seq):
         x, y = i % line_length, -(i // line_length)
-        colour = _SEQUENCE_COLOURS["low support"] if base.islower() else _SEQUENCE_COLOURS[category(i)]
+        highlighted = category(i) in ("inserted", "microhomology")
         ax.text(x, y, base.upper(), family="monospace", fontsize=9, ha="center", va="center",
-                color=colour, fontweight="bold" if category(i) != "left" and category(i) != "right" else None)
+                color=_SEQUENCE_COLOURS[category(i)], alpha=0.4 if base.islower() else 1.0,
+                fontweight="bold" if highlighted else None)
     for line in range(n_lines):
         ax.text(-1.5, -line, f"{line * line_length + 1}", ha="right", va="center", fontsize=7,
                 color="#555555")
@@ -764,15 +768,17 @@ def _draw_sequence_panel(ax, alignment: dict, ev: dict, line_length: int = 100) 
     ax.axis("off")
     ax.set_title(f"Junction consensus ({len(seq)} bp)" + (f"\n{caption}" if caption else ""),
                  fontsize=10)
-    shown = {"left", "right", "low support"}
+    shown = {"left", "right"}
     if inserted:
         shown.add("inserted")
     if mh_left or mh_right:
         shown.add("microhomology")
     ax.legend(
         handles=[matplotlib.patches.Patch(color=c, label=label)
-                 for label, c in _SEQUENCE_COLOURS.items() if label in shown],
-        fontsize=7, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=len(shown),
+                 for label, c in _SEQUENCE_COLOURS.items() if label in shown]
+        + [matplotlib.patches.Patch(color="grey", alpha=0.4,
+                                    label="faded: fewer than 3 reads or < 80% agreement")],
+        fontsize=7, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=len(shown) + 1,
         frameon=False,
     )
 
@@ -859,7 +865,102 @@ def _draw_structure_panel(ax, ev: dict) -> None:
     title = f"{ev['chrom']}: {sv_type} (not to scale)"
     if ev.get("_segments"):
         title += f"\ndepth relative to flanks, by segment between breakpoints: {ev['_segments']}"
+    if ev.get("_overview"):
+        title += "\nthis junction alone; all the junctions of the locus are in the overview figure"
     ax.set_title(title, fontsize=10)
+
+
+_SV_COLOURS = {"deletion": "darkred", "duplication": "navy"}
+
+
+def _plot_overview(bam_name: str, locus, segments: list[dict], joined: list[dict],
+                   output_path: str) -> None:
+    """All the breakpoints of a locus: the reference segments with their depth
+    relative to the flanks, the joined pairs as arcs, and one possible
+    haplotype built from them (:func:`ardu.sv_model.build_model`).
+    """
+    order = [int(segments[1]["segment"].split("-")[0])] + [
+        int(r["segment"].split("-")[1]) for r in segments[1:-1]
+    ]
+    n = len(order)
+    depths = [r["relative_depth"] for r in segments]
+    events = []
+    for ev in joined:
+        b1, b2 = map(int, ev["pair"].split("-"))
+        i, j = sorted((order.index(b1), order.index(b2)))
+        events.append((ev["pair"], ev["sv_type"], i, j))
+    pieces, notes = build_model(n, events, depths,
+                                seed=zlib.crc32(f"{bam_name}:{locus}".encode()))
+
+    palette = plt.get_cmap("tab10")
+    colours = [_FLANK_COLOUR] + [palette(k % 10) for k in range(n - 1)] + [_FLANK_COLOUR]
+    widths = [1.0] + [2.0] * (n - 1) + [1.0]
+    seg_label = ["flank"] + [r["segment"] for r in segments[1:-1]] + ["flank"]
+    h, y_ref, y_hap = 0.3, 1.6, 0.0
+    fig, ax = plt.subplots(figsize=(max(10, 1.6 * (sum(widths[p["seg"]] for p in pieces))), 5))
+
+    def block(x, k, y, label):
+        ax.add_patch(matplotlib.patches.FancyArrow(
+            x, y, widths[k], 0, width=h, head_width=h, head_length=0.15,
+            length_includes_head=True, facecolor=colours[k], edgecolor="black", linewidth=0.8,
+        ))
+        ax.text(x + widths[k] / 2 - 0.07, y, label, ha="center", va="center", fontsize=8,
+                color="white" if 0 < k < n else "black")
+
+    # reference, depth above each segment, breakpoints below
+    x, bkp_x = 0.0, []
+    for k in range(n + 1):
+        block(x, k, y_ref, seg_label[k])
+        if depths[k] is not None:
+            ax.text(x + widths[k] / 2, y_ref + h, f"x{depths[k]:.1f}", ha="center",
+                    va="bottom", fontsize=8)
+        x += widths[k]
+        if k < n:
+            bkp_x.append(x)
+    for k, bx in enumerate(bkp_x):
+        ax.plot([bx, bx], [y_ref - h, y_ref + h], color=_BREAKPOINT_COLOUR, linewidth=1.5)
+        ax.text(bx, y_ref - h * 1.2, f"{order[k]}\n{segments[k]['end']:,}", ha="center",
+                va="top", fontsize=7, color=_BREAKPOINT_COLOUR)
+    ref_width = x
+
+    # joined pairs as arcs above the reference
+    spans = {ev["pair"]: abs(order.index(int(ev["pair"].split("-")[1]))
+                             - order.index(int(ev["pair"].split("-")[0]))) for ev in joined}
+    for ev in joined:
+        b1, b2 = map(int, ev["pair"].split("-"))
+        x1, x2 = sorted((bkp_x[order.index(b1)], bkp_x[order.index(b2)]))
+        # wider arcs are taller, so nested junctions stay inside and their labels apart
+        height = 0.3 + 0.7 * spans[ev["pair"]] / max(spans.values())
+        colour = _SV_COLOURS.get(ev["sv_type"], "grey")
+        ax.add_patch(matplotlib.patches.Arc(((x1 + x2) / 2, y_ref + h * 2.2), x2 - x1, 2 * height,
+                                            theta1=0, theta2=180, color=colour, linewidth=1.5))
+        ax.text((x1 + x2) / 2, y_ref + h * 2.2 + height + 0.05,
+                f"{ev['pair']} {ev['sv_type'] or 'joined'} (support {ev['support']})",
+                ha="center", va="bottom", fontsize=8, color=colour)
+
+    # one possible haplotype
+    x = 0.0
+    for p in pieces:
+        if p["junction"]:
+            ax.plot([x, x], [y_hap - h, y_hap + h], color=_BREAKPOINT_COLOUR, linewidth=2)
+            ax.text(x, y_hap - h * 1.3, p["junction"], ha="center", va="top", fontsize=7,
+                    color=_BREAKPOINT_COLOUR)
+        label = seg_label[p["seg"]] + (f" (c{p['copy']})" if p["copy"] else "")
+        block(x, p["seg"], y_hap, label)
+        x += widths[p["seg"]]
+
+    ax.text(-0.2, y_ref, "reference", ha="right", va="center", fontsize=9)
+    ax.text(-0.2, y_hap, f"{bam_name}\n(one possible\nhaplotype)", ha="right", va="center",
+            fontsize=9)
+    if notes:
+        ax.text(0, y_hap - 0.9, "\n".join(notes), ha="left", va="top", fontsize=8,
+                style="italic")
+    ax.set_xlim(-2.2, max(x, ref_width) + 0.3)
+    ax.set_ylim(y_hap - 1.0 - 0.15 * len(notes), y_ref + h * 2.2 + 1.3)
+    ax.axis("off")
+    ax.set_title(f"{bam_name} | {locus} {segments[0]['chrom']}: joined breakpoints and one "
+                 "possible haplotype (not to scale, depth relative to the flanks)", fontsize=10)
+    _save(output_path)
 
 
 def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
@@ -1322,10 +1423,17 @@ def run(args) -> None:
             _plot_softclip_positions(list(window_plots.values()),
                                      f"{args.output}_{bam_name}_softclip_dist.png")
         if args.plot_evidence:
+            for locus in dict.fromkeys(k[0] for k in windows):
+                rows = [r for r in segments if r["locus"] == locus]
+                locus_joined = [ev for _, _, _, ev in joined if ev["locus"] == locus]
+                if len(rows) >= 4 and locus_joined:
+                    _plot_overview(bam_name, locus, rows, locus_joined,
+                                   f"{args.output}_{bam_name}_{locus}_overview.png")
             for locus, b1, b2, ev, panel, alignment in pair_results:
                 if not ev["joined"]:
                     continue
                 ev["_segments"] = segment_text.get(locus)
+                ev["_overview"] = sum(1 for r in segments if r["locus"] == locus) >= 4
                 _plot_evidence(
                     ev, (window_plots[(locus, b1)], window_plots[(locus, b2)]), panel,
                     f"{args.output}_{bam_name}_{locus}_{b1}-{b2}_evidence.png",

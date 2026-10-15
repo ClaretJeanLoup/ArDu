@@ -262,7 +262,9 @@ For each pair, the evidence is gathered in `*_junction_summary.tsv`:
 
 `*_segments.tsv` gives, for each locus with two breakpoints or more, the median depth of each segment between consecutive breakpoints (refined ones when joined, else predicted) and of the flanks outside them (`--segment-flank`, default 10 kb), relative to the mean of the two flanks.
 
-`--plot-evidence` draws one figure per sample and joined breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction, its sequence and the segment depths; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
+With `--plot-evidence`, a locus with three breakpoints or more also gets an **overview** figure: the reference segments with their depth relative to the flanks, each joined pair as an arc labelled with its SV type and support, and one possible haplotype built from them. Joined deletions and tandem duplications are applied outermost first; an event nested inside a duplicated segment is placed on one of its copies chosen at random (noted on the figure), or, for a deletion whose segment is less covered than the flanks, on both copies. The junction reads alone cannot tell these apart; only the depth can. Junctions that overlap without nesting are shown as arcs but not modelled.
+
+`--plot-evidence` also draws one figure per sample and joined breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction, its sequence and the segment depths; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
 #### Junction sequence
 
@@ -270,7 +272,7 @@ With `--junction` and `--plot-evidence`, and [MAFFT](https://mafft.cbrc.jp/align
 
 Given a reference (`--reference`, or the `--blast` one), the reads are added onto the junction expected from the refined breakpoints (`--addfragments`), which gives the bases inserted at the junction, the identity of the consensus with the expected junction, and the microhomology (bases found on both sides, which leave the exact breakpoint ambiguous within them). Long inserted sequences show only as far as the reads cover them.
 
-The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn in the evidence figure: the reads around the junction, and the consensus sequence coloured by side of the junction, with inserted bases, microhomology and weakly supported bases marked and the coordinates of each side.
+The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn in the evidence figure: the reads around the junction, and the consensus sequence coloured by side of the junction, with inserted bases and microhomology highlighted, weakly supported bases faded, and the coordinates of each side.
 
 All outputs are written to a `junctions/` subdirectory inside the existing `ArDuRun-*` output folder.
 
@@ -320,6 +322,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `{sample}_{locus}_1-2_junction_reads.fasta` | Reads spanning the junction (if `--junction` used). |
 | `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileups, left and right clips stacked, with predicted and refined breakpoint positions. |
+| `*_{sample}_{locus}_overview.png` | For a locus with three breakpoints or more: segments, joined pairs and one possible haplotype (if `--plot-evidence` used). |
 | `*_{sample}_{locus}_1-2_evidence.png` | Softclips at both breakpoints and bridging pair inserts, with the SV call and its evidence (if `--plot-evidence` used). |
 
 ---
