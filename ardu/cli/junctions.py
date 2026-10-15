@@ -23,7 +23,8 @@ import pysam
 
 matplotlib.use("Agg")
 
-from ardu.bam import read_pair_info
+from ardu import bam as bam_utils
+from ardu.bam import passes_read_filters, read_pair_info
 from ardu.junctionlib import (
     build_softclip_automaton,
     find_reads_with_multiple_softclips_aho,
@@ -79,6 +80,10 @@ def register(subparsers) -> None:
                              "the SV is longer than the library insert. Default=auto.")
     parser.add_argument("--plot-softclip", action="store_true",
                         help="Plot softclip position distributions.")
+    parser.add_argument("--plot-evidence", action="store_true",
+                        help="Plot, per sample and breakpoint pair, the softclips at both "
+                             "breakpoints and the bridging pair inserts, with the evidence "
+                             "summary in the title.")
     parser.add_argument("--plot-mode",
                         choices=["per-bam", "pooled", "both"],
                         default="per-bam",
@@ -175,17 +180,16 @@ def _extract_softclips(
     fasta_output: str,
     tsv_output: str,
     breakpoint: int,
-    pairs: dict,
-    softclip_positions_by_bkp: dict,
-) -> dict[int, list[str]]:
-    """Extract softclips and return ``{bkp: [clip_sequence, ...]}``.
+    window: dict,
+) -> None:
+    """Extract the softclips of the reads in *region* into *window*.
 
-    Also writes to the shared FASTA / TSV outputs, records softclip positions,
-    and stores in *pairs* ``{read_name: (read_start, PairInfo)}`` for every
-    read pair with a mate in the window.
+    Also writes to the shared FASTA / TSV outputs. *window* collects
+    ``seqs`` (clip sequences), ``clips`` (``(position, side)``, side ``L`` for
+    a left clip at the first aligned base, ``R`` for a right clip at the last
+    one), ``pairs`` (``{read_name: (read_start, PairInfo)}``) and ``splits``
+    (split reads, see :func:`_split_read`).
     """
-    softclips_by_bkp: dict[int, list[str]] = {breakpoint: []}
-
     def _has_valid_cigar(read) -> bool:
         return read.cigar is not None and len(read.cigar) > 0
 
@@ -207,13 +211,16 @@ def _extract_softclips(
             )
             pair = read_pair_info(read)
             if pair is not None:
-                pairs[read.query_name] = (read.reference_start, pair)
+                window["pairs"][read.query_name] = (read.reference_start, pair)
             insert_size = pair.insert if pair is not None else None
+            split = _split_read(read)
+            if split is not None:
+                window["splits"][(read.query_name, read.is_read1)] = split
 
             # LEFT softclip
             if read.cigar[0][0] == 4 and read.cigar[0][1] >= min_clip:
                 left_clip = read.query_sequence[: read.cigar[0][1]]
-                softclips_by_bkp[breakpoint].append(left_clip)
+                window["seqs"].append(left_clip)
                 fasta_out.write(
                     f">{chrom}:{mapping_position}_{read.query_name}_{breakpoint}_L\n"
                     f"{left_clip}\n"
@@ -223,15 +230,13 @@ def _extract_softclips(
                     f"{mapping_position}\tleftmost_clip\t{cigar}\t{mate_position}\t"
                     f"{insert_size}\t{region}\t{breakpoint}\n"
                 )
-                softclip_positions_by_bkp.setdefault(breakpoint, []).append(
-                    mapping_position
-                )
+                window["clips"].append((mapping_position, "L"))
 
             # RIGHT softclip
             if read.cigar[-1][0] == 4 and read.cigar[-1][1] >= min_clip:
                 right_clip = read.query_sequence[-read.cigar[-1][1]:]
                 clip_position = read.reference_end
-                softclips_by_bkp[breakpoint].append(right_clip)
+                window["seqs"].append(right_clip)
                 fasta_out.write(
                     f">{chrom}:{clip_position}_{read.query_name}_{breakpoint}_R\n"
                     f"{right_clip}\n"
@@ -241,11 +246,95 @@ def _extract_softclips(
                     f"{clip_position}\trightmost_clip\t{cigar}\t{mate_position}\t"
                     f"{insert_size}\t{region}\t{breakpoint}\n"
                 )
-                softclip_positions_by_bkp.setdefault(breakpoint, []).append(
-                    clip_position
-                )
+                window["clips"].append((clip_position, "R"))
 
-    return softclips_by_bkp
+
+# ---------------------------------------------------------------------------
+# Split reads and junction geometry
+# ---------------------------------------------------------------------------
+
+_CIGAR_RE = re.compile(r"(\d+)([MIDNSHP=X])")
+
+
+def _clipped_end(start: int, cigar: str) -> tuple[int, str] | None:
+    """``(position, side)`` of the clipped end of an alignment starting at
+    1-based *start*: the first aligned base for a left clip (``L``), the last
+    one for a right clip (``R``). The longer clip wins; ``None`` if unclipped.
+    """
+    ops = [(int(n), op) for n, op in _CIGAR_RE.findall(cigar)]
+    lead = trail = 0
+    for n, op in ops:
+        if op not in "SH":
+            break
+        lead += n
+    for n, op in reversed(ops):
+        if op not in "SH":
+            break
+        trail += n
+    if lead == trail == 0:
+        return None
+    if lead >= trail:
+        return start, "L"
+    return start + sum(n for n, op in ops if op in "MDN=X") - 1, "R"
+
+
+def _split_read(read) -> tuple | None:
+    """Junction ends of a split read: ``(position, side, [(chrom, position, side), ...])``
+    for the primary alignment and each supplementary alignment of its SA tag.
+    """
+    if (read.is_supplementary or not read.has_tag("SA")
+            or not passes_read_filters(read)):
+        return None
+    here = _clipped_end(read.reference_start + 1, read.cigarstring)
+    if here is None:
+        return None
+    others = []
+    for entry in read.get_tag("SA").rstrip(";").split(";"):
+        chrom, pos, _strand, cigar, mapq, _nm = entry.split(",")
+        end = _clipped_end(int(pos), cigar)
+        if end is not None and int(mapq) >= bam_utils.MIN_MAPPING_QUALITY:
+            others.append((chrom, *end))
+    return (*here, others) if others else None
+
+
+def _split_junctions(windows: dict, k1: tuple, k2: tuple) -> Counter:
+    """Split reads joining windows *k1* and *k2*, counted by junction
+    ``(pos1, side1, pos2, side2)``, the ends at *k1* first. Each read counts once.
+    """
+    junctions: Counter = Counter()
+    seen: set = set()
+    for here, there in ((k1, k2), (k2, k1)):
+        chrom, start, end = windows[there]["region"]
+        for read_id, (pos, side, others) in windows[here]["splits"].items():
+            if read_id in seen:
+                continue
+            for o_chrom, o_pos, o_side in others:
+                if o_chrom == chrom and start < o_pos <= end:
+                    seen.add(read_id)
+                    junctions[(pos, side, o_pos, o_side) if here == k1
+                              else (o_pos, o_side, pos, side)] += 1
+                    break
+    return junctions
+
+
+def _top_clip(clips: list[tuple[int, str]]) -> tuple[int, str] | None:
+    """The ``(position, side)`` with the most softclips."""
+    return Counter(clips).most_common(1)[0][0] if clips else None
+
+
+def _sv_geometry(a: tuple[int, str], b: tuple[int, str]) -> tuple[str | None, int | None]:
+    """SV type and size from the clipped ends at two breakpoints.
+
+    A tandem duplication leaves left clips at its first base and right clips at
+    its last; a deletion leaves right clips at the last base before it and left
+    clips at the first base after it.
+    """
+    (left_pos, left_side), (right_pos, right_side) = sorted((a, b))
+    if (left_side, right_side) == ("L", "R"):
+        return "duplication", right_pos - left_pos + 1
+    if (left_side, right_side) == ("R", "L"):
+        return "deletion", right_pos - left_pos - 1
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -361,26 +450,50 @@ def _summary_rows(bam_name: str, library: list[int], library_mad, panels: list[d
 # ---------------------------------------------------------------------------
 
 _ORIENTATION_COLOURS = {"FR": "steelblue", "RF": "darkorange", "FF": "seagreen", "RR": "mediumpurple"}
+_SIDE_COLOURS = {"L": "steelblue", "R": "darkorange"}
+_SIDE_LABELS = {"L": "left clips", "R": "right clips"}
 
 
-def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
-    """Plot the insert sizes of each panel, stacked by pair orientation.
-
-    Bridging panels (one per breakpoint pair) show the pairs joining the two
-    breakpoints, with a red line at the insert expected for the SV type.
-    Discordant panels (one per breakpoint) show the discordant pairs with a
-    mate in the window. The library insert is given in the title.
-    """
-    num = max(1, len(panels))
+def _grid(num: int):
+    num = max(1, num)
     cols = min(num, 3)
     rows = math.ceil(num / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
-    axes = np.array(axes).reshape(-1)
+    return fig, np.array(axes).reshape(-1)
 
-    for ax, panel in zip(axes, panels):
-        if not panel["pairs"]:
-            ax.axis("off")
-            continue
+
+def _save(output_path: str) -> None:
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved {output_path}")
+
+
+def _count_axis(ax, counts, label: str) -> None:
+    # a log axis only helps when counts span orders of magnitude
+    if np.max(counts) >= 20:
+        ax.set_yscale("log")
+        label += " (log)"
+    else:
+        ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+    ax.set_ylabel(label, fontsize=9)
+
+
+def _bp_axis(ax, label: str) -> None:
+    ax.set_xlabel(label, fontsize=9)
+    ax.xaxis.set_major_formatter(
+        matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}")
+    )
+    ax.tick_params(axis="x", labelrotation=30, labelsize=8)
+
+
+def _draw_insert_panel(ax, panel: dict) -> None:
+    """Insert sizes of *panel*, stacked by orientation, with the expected insert."""
+    if not panel["pairs"]:
+        ax.text(0.5, 0.5, "no pairs", ha="center", va="center", transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
         inserts = [p.insert for p in panel["pairs"]]
         bins = np.histogram_bin_edges(
             inserts, bins=min(100, max(10, int(np.sqrt(len(inserts)))))
@@ -394,146 +507,217 @@ def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
             label=[f"{o} (n={sum(p.orientation == o for p in panel['pairs'])})"
                    for o in orientations],
         )
-        # a log axis only helps when counts span orders of magnitude
-        log_y = np.max(counts) >= 20
-        if log_y:
-            ax.set_yscale("log")
-        else:
-            ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        _count_axis(ax, counts, "Count")
+        _bp_axis(ax, "Insert size (bp)")
 
-        if panel["expected"] is not None:
-            ax.axvline(
-                panel["expected"], color="red", linestyle="--", linewidth=1.5,
-                label=f"expected {panel['sv_type']}: {panel['expected']:,.0f} bp",
-            )
-
-        title = f"{panel['locus']} | BKP {panel['panel']} ({panel['class']} pairs)"
-        if panel["library_median"] is not None:
-            title += f"\nlibrary insert {panel['library_median']:,.0f} bp"
-        ax.set_title(title, fontsize=10)
-        ax.set_xlabel("Insert size (bp)", fontsize=9)
-        ax.set_ylabel("Count (log)" if log_y else "Count", fontsize=9)
-        ax.xaxis.set_major_formatter(
-            matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}")
+    if panel["expected"] is not None:
+        ax.axvline(
+            panel["expected"], color="red", linestyle="--", linewidth=1.5,
+            label=f"expected {panel['sv_type']}: {panel['expected']:,.0f} bp",
         )
-        ax.tick_params(axis="x", labelrotation=30, labelsize=8)
+    title = f"{panel['locus']} | BKP {panel['panel']} ({panel['class']} pairs)"
+    if panel["library_median"] is not None:
+        title += f"\nlibrary insert {panel['library_median']:,.0f} bp"
+    ax.set_title(title, fontsize=10)
+    if ax.get_legend_handles_labels()[0]:
         ax.legend(fontsize=8)
 
+
+def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
+    """One insert panel per breakpoint pair (bridging pairs) or per breakpoint
+    (discordant pairs); see :func:`_draw_insert_panel`.
+    """
+    _, axes = _grid(len(panels))
+    for ax, panel in zip(axes, panels):
+        _draw_insert_panel(ax, panel)
     for ax in axes[len(panels):]:
         ax.axis("off")
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"Saved {output_path}")
+    _save(output_path)
 
 
-def _plot_softclip_positions(
-    softclip_positions_by_bkp: dict,
-    bkp_to_expected_pos: dict,
-    output_path: str,
-    bam_name: str = "",
-    pair_keys: list | None = None,
-) -> None:
-    """Plot softclip pileup per breakpoint as bar charts with actual genomic coordinates.
-
-    One panel per breakpoint (per-BAM mode) or per pair (pooled mode).
-    Each panel shows:
-      - bar chart of softclip counts at each position
-      - blue dashed line: mode (position with most softclips)
-      - red line: predicted breakpoint position from coverage analysis
-      - offset between mode and predicted shown in the title
+def _draw_softclip_panel(ax, title: str, clips: list, predicted, refined) -> None:
+    """Softclip positions binned over the window, stacked by clip side, with
+    the breakpoint predicted from coverage and the refined junction end.
     """
-    # Build per-panel data: list of (panel_title, {bkp: positions_list})
-    if pair_keys is not None:
-        # pooled mode: one panel per pair, positions from both breakpoints overlaid
-        data_items = []
-        for pair_key in pair_keys:
-            panel_data = {
-                bkp: softclip_positions_by_bkp.get(bkp, [])
-                for bkp in pair_key
-            }
-            data_items.append((pair_key, panel_data))
-    else:
-        # per-BAM mode: one panel per breakpoint
-        data_items = [
-            ((bkp,), {bkp: positions})
-            for bkp, positions in softclip_positions_by_bkp.items()
-        ]
+    ax.set_title(title, fontsize=10)
+    if not clips:
+        ax.text(0.5, 0.5, "no softclips", ha="center", va="center", transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return
+    positions = [p for p, _ in clips]
+    span = max(positions) - min(positions) + 1
+    width = max(1, math.ceil(span / 100))
+    bins = np.arange(min(positions), max(positions) + width + 1, width)
+    sides = [side for side in _SIDE_COLOURS if any(c[1] == side for c in clips)]
+    counts, _, _ = ax.hist(
+        [[p for p, side_ in clips if side_ == side] for side in sides],
+        bins=bins, stacked=True,
+        color=[_SIDE_COLOURS[side] for side in sides],
+        label=[f"{_SIDE_LABELS[side]} (n={sum(c[1] == side for c in clips)})" for side in sides],
+    )
+    if predicted is not None:
+        ax.axvline(predicted, color="red", linewidth=1.2,
+                   label=f"predicted: {predicted:,.0f}")
+    if refined is not None:
+        pos, side, source = refined
+        offset = f", {pos - predicted:+,.0f} bp" if predicted is not None else ""
+        ax.axvline(pos, color="black", linestyle="--", linewidth=1.2,
+                   label=f"junction ({source}): {pos:,} {side}{offset}")
+    _count_axis(ax, counts, "Softclips")
+    _bp_axis(ax, f"Genomic position ({width} bp bins)")
+    ax.legend(fontsize=7, loc="upper right")
 
-    num = max(1, len(data_items))
-    cols = min(num, 3)
-    rows = math.ceil(num / cols)
-    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 4 * rows))
-    axes = np.array(axes).reshape(-1)
 
-    colors = ["steelblue", "darkorange", "seagreen", "mediumpurple"]
-
-    for ax, (pair_key, panel_data) in zip(axes, data_items):
-        has_data = any(len(v) > 0 for v in panel_data.values())
-        if not has_data:
-            ax.axis("off")
-            continue
-
-        for color_idx, (bkp, positions) in enumerate(panel_data.items()):
-            if not positions:
-                continue
-            counts = Counter(positions)
-            xs = sorted(counts)
-            ys = [counts[x] for x in xs]
-            color = colors[color_idx % len(colors)]
-
-            # Bar chart — width scaled to the density of positions
-            span = max(xs) - min(xs) if len(xs) > 1 else 1
-            bar_width = max(1, span // max(len(xs), 1))
-            ax.bar(xs, ys, width=bar_width, color=color, alpha=0.7,
-                   label=f"BKP {bkp} (n={len(positions)})")
-
-            # Mode line
-            mode = max(counts, key=counts.__getitem__)
-            ax.axvline(mode, color=color, linestyle="--", linewidth=1.5,
-                       label=f"BKP {bkp} mode: {mode:,}")
-
-            # Predicted breakpoint line + offset annotation
-            exp = bkp_to_expected_pos.get(bkp)
-            if exp:
-                ax.axvline(exp, color="red", linestyle="-", linewidth=1.2,
-                           label=f"BKP {bkp} predicted: {exp:,}")
-                offset = mode - exp
-                ax.annotate(
-                    f"offset: {offset:+,} bp",
-                    xy=(exp, ax.get_ylim()[1]),
-                    xytext=(5, -12),
-                    textcoords="offset points",
-                    color="red", fontsize=8,
-                )
-
-        chrom = ""
-        for bkp in pair_key:
-            exp = bkp_to_expected_pos.get(bkp)
-            if exp:
-                # get chrom from regions if available (best effort)
-                break
-        bkp_label = "-".join(map(str, pair_key))
-        title = f"BKP {bkp_label}"
-        if bam_name:
-            title = f"{bam_name} | {title}"
-        ax.set_title(title, fontsize=10)
-        ax.set_xlabel("Genomic position", fontsize=9)
-        ax.set_ylabel("Softclip count", fontsize=9)
-        ax.xaxis.set_major_formatter(
-            matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}")
-        )
-        ax.tick_params(axis="x", labelrotation=30, labelsize=8)
-        ax.legend(fontsize=7, loc="upper right")
-
-    for ax in axes[num:]:
+def _plot_softclip_positions(windows: list[dict], output_path: str) -> None:
+    """One softclip panel per breakpoint window; see :func:`_draw_softclip_panel`."""
+    _, axes = _grid(len(windows))
+    for ax, w in zip(axes, windows):
+        _draw_softclip_panel(ax, w["title"], w["clips"], w["predicted"], w["refined"])
+    for ax in axes[len(windows):]:
         ax.axis("off")
+    _save(output_path)
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"Saved {output_path}")
+
+def _evidence_text(ev: dict) -> str:
+    if ev["sv_type"] and ev["size"]:
+        call = (f"{ev['sv_type']} {ev['bkp1_refined']:,}-{ev['bkp2_refined']:,} "
+                f"({ev['size']:,} bp)" if ev["bkp1_refined"] else
+                f"{ev['sv_type']} (~{ev['size']:,} bp)")
+    else:
+        call = "no SV call"
+    junction_reads = "NA" if ev["junction_reads"] is None else ev["junction_reads"]
+    pairs = f"{ev['bridging_pairs']} bridging pairs"
+    if ev["bridging_pairs"]:
+        pairs += f" ({ev['pair_orientation']}, median insert {ev['insert_median']:,.0f} bp)"
+    return (f"{ev['bam']} | {ev['locus']} BKP {ev['pair']}: {call}\n"
+            f"{ev['split_reads']} split reads, {junction_reads} junction reads, {pairs}")
+
+
+def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str) -> None:
+    """Softclips at both breakpoints and bridging pair inserts of one SV, with
+    the evidence summarised in the title.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+    for ax, w in zip(axes, windows):
+        _draw_softclip_panel(ax, w["title"], w["clips"], w["predicted"], w["refined"])
+    _draw_insert_panel(axes[2], panel)
+    fig.suptitle(_evidence_text(ev), fontsize=11, y=1.02)
+    _save(output_path)
+
+
+# ---------------------------------------------------------------------------
+# Evidence per breakpoint pair
+# ---------------------------------------------------------------------------
+
+def _locus_pairs(windows: dict, canonical_pairs: list) -> list[tuple]:
+    """``(locus, b1, b2)`` for the --pairs present in each locus, or every pair
+    of breakpoints within a locus without --pairs.
+    """
+    out = []
+    for locus in dict.fromkeys(k[0] for k in windows):
+        bkps = sorted(b for l, b in windows if l == locus)
+        candidates = canonical_pairs or [
+            (a, b) for i, a in enumerate(bkps) for b in bkps[i + 1:]
+        ]
+        out += [(locus, b1, b2) for b1, b2 in candidates if b1 in bkps and b2 in bkps]
+    return out
+
+
+def _junction_search(bam_file: str, windows: dict, locus_pairs: list) -> tuple[list, dict]:
+    """Reads containing softclips from both breakpoints of a pair, and their
+    number per ``(locus, b1, b2)``.
+    """
+    allowed = set()
+    for locus, b1, b2 in locus_pairs:
+        allowed |= {((locus, b1), (locus, b2)), ((locus, b2), (locus, b1))}
+    keys = sorted({k for pair in allowed for k in pair})
+    if not any(windows[k]["seqs"] for k in keys):
+        return [], {}
+    automaton = build_softclip_automaton({k: windows[k]["seqs"] for k in keys})
+
+    # one fetch over the span of each locus when its windows share a chromosome
+    search_regions = []
+    for locus in dict.fromkeys(k[0] for k in keys):
+        regions = [windows[k]["region"] for k in keys if k[0] == locus]
+        if len({r[0] for r in regions}) == 1:
+            search_regions.append((regions[0][0], min(r[1] for r in regions),
+                                   max(r[2] for r in regions)))
+        else:
+            search_regions.extend(regions)
+
+    matches, seen = [], set()
+    for i, region in enumerate(search_regions):
+        # unplaced unmapped reads are scanned once, with the first region
+        for m in find_reads_with_multiple_softclips_aho(
+            bam_file, automaton, region, allowed, include_unplaced=(i == 0),
+        ):
+            key = (m["read_name"], m["breakpoints"])
+            if key not in seen:
+                seen.add(key)
+                matches.append(m)
+
+    names: dict[tuple, set] = {}
+    for m in matches:
+        (locus, a), (_, b) = m["breakpoints"]
+        names.setdefault((locus, *_canonical_pair_key(a, b)), set()).add(m["read_name"])
+    return matches, {k: len(v) for k, v in names.items()}
+
+
+def _pair_evidence(
+    bam_name: str, locus, b1: int, b2: int, windows: dict, bridges: dict,
+    junction_counts: dict | None, library_median, library_mad, sv_type: str,
+) -> tuple[dict, dict]:
+    """Evidence row and bridging insert panel for breakpoints *b1*, *b2* of *locus*.
+
+    The junction is the one most split reads support, or the top softclip of
+    each window without split reads. The SV type is, in order: --sv-type, the
+    split read geometry, the bridging pair orientation, the softclip geometry.
+    """
+    k1, k2 = (locus, b1), (locus, b2)
+    w1, w2 = windows[k1], windows[k2]
+    junctions = _split_junctions(windows, k1, k2)
+    ends, refined_by, at_junction = (None, None), None, 0
+    if junctions:
+        (p1, s1, p2, s2), at_junction = junctions.most_common(1)[0]
+        ends, refined_by = ((p1, s1), (p2, s2)), "split_reads"
+    elif w1["clips"] and w2["clips"]:
+        ends, refined_by = (_top_clip(w1["clips"]), _top_clip(w2["clips"])), "softclips"
+    geometry_type, size = _sv_geometry(*ends) if refined_by else (None, None)
+
+    chosen = sv_type if sv_type != "auto" else (
+        geometry_type if refined_by == "split_reads" else None
+    )
+    pairs = [p for _, p in bridges.get((locus, b1, b2), {}).values()]
+    panel = {
+        "locus": locus, "panel": f"{b1}-{b2}", "class": "bridging", "pairs": pairs,
+        "size": size if size is not None else abs(w2["predicted"] - w1["predicted"]),
+    }
+    _finish_panel(panel, library_median, library_mad, chosen or "auto")
+
+    ev = {
+        "bam": bam_name, "locus": locus, "pair": f"{b1}-{b2}", "chrom": w1["region"][0],
+        "bkp1_predicted": w1["predicted"], "bkp2_predicted": w2["predicted"],
+        "bkp1_refined": ends[0][0] if ends[0] else None,
+        "bkp1_side": ends[0][1] if ends[0] else None,
+        "bkp2_refined": ends[1][0] if ends[1] else None,
+        "bkp2_side": ends[1][1] if ends[1] else None,
+        "refined_by": refined_by,
+        "sv_type": chosen or panel["sv_type"] or geometry_type,
+        "size": size,
+        "split_reads": sum(junctions.values()),
+        "split_reads_at_junction": at_junction,
+        "junction_reads": (None if junction_counts is None
+                           else junction_counts.get((locus, b1, b2), 0)),
+        "softclips_bkp1": len(w1["clips"]),
+        "softclips_bkp2": len(w2["clips"]),
+        "bridging_pairs": len(pairs),
+        "pair_orientation": (Counter(p.orientation for p in pairs).most_common(1)[0][0]
+                             if pairs else None),
+        "insert_median": float(np.median([p.insert for p in pairs])) if pairs else None,
+        "insert_expected": panel["expected"],
+    }
+    return ev, panel
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +731,7 @@ def run(args) -> None:
     blast_output = f"{args.output}_BLAST_results.txt"
     bridges_output = f"{args.output}_bridging_pairs.tsv"
     summary_output = f"{args.output}_insert_summary.tsv"
+    evidence_output = f"{args.output}_junction_summary.tsv"
 
     for path in (fasta_output, tsv_output):
         if os.path.exists(path):
@@ -597,19 +782,6 @@ def run(args) -> None:
         lambda x: os.path.basename(x) + ".bam"
     )
 
-    regions_by_bkp = {
-        row["breakpoint_number"]: (
-            row["chromosome"],
-            row["position"] - args.extension,
-            row["position"] + args.extension,
-        )
-        for _, row in breakpoints_df.iterrows()
-    }
-    bkp_to_expected_pos = {
-        row["breakpoint_number"]: row["position"]
-        for _, row in breakpoints_df.iterrows()
-    }
-
     with open(tsv_output, "w") as out:
         out.write(
             "bam_file\tRead_name\tPosition\tClipping_position\t"
@@ -620,9 +792,11 @@ def run(args) -> None:
                  "orientation\tproper_pair\tbreakpoint_bridge\n")
 
     summary_rows: list[dict] = []
+    evidence_rows: list[dict] = []
     pooled_library: list[int] = []
     pooled_panels: dict = {}
-    pooled_softclip_by_pair: dict = {}
+    pooled_windows: dict = {}
+    output_dir = os.path.dirname(args.output) or "."
 
     # ------------------------------------------------------------------
     # Per-BAM processing
@@ -631,32 +805,23 @@ def run(args) -> None:
         print(f"\n=== PROCESSING BAM: {bam_basename} ===")
         bam_name = bam_basename.removesuffix(".bam")
 
-        softclips_by_bkp: dict[int, list[str]] = {}
-        softclip_positions_by_bkp: dict[int, list[int]] = {}
-        # Breakpoint numbers restart for each sample and locus, so the insert
-        # analysis keys its windows by (locus, breakpoint) within this BAM.
-        pairs_by_key: dict[tuple, dict] = {}
-        regions_by_key: dict[tuple, tuple] = {}
-        positions_by_key: dict[tuple, int] = {}
-
+        # Breakpoint numbers restart for each sample and locus, so windows are
+        # keyed by (locus, breakpoint) within this BAM.
+        windows: dict[tuple, dict] = {}
         bkp_subset = breakpoints_df[breakpoints_df["bam_file"] == bam_basename]
-
         for _, row in bkp_subset.iterrows():
             bkp = row["breakpoint_number"]
             pos = row["position"]
-            region = (row["chromosome"], pos - args.extension, pos + args.extension)
             key = (row.get("locus", ""), bkp)
-            regions_by_key[key] = region
-            positions_by_key[key] = pos
-
-            bkp_clips = _extract_softclips(
-                bam_file, region, args.size,
-                fasta_output, tsv_output, bkp,
-                pairs_by_key.setdefault(key, {}), softclip_positions_by_bkp,
-            )
-            softclips_by_bkp.setdefault(bkp, []).extend(bkp_clips.get(bkp, []))
+            windows[key] = {
+                "region": (row["chromosome"], pos - args.extension, pos + args.extension),
+                "predicted": pos, "seqs": [], "clips": [], "pairs": {}, "splits": {},
+            }
+            _extract_softclips(bam_file, windows[key]["region"], args.size,
+                               fasta_output, tsv_output, bkp, windows[key])
 
         # ---- Insert sizes ----
+        pairs_by_key = {k: w["pairs"] for k, w in windows.items()}
         library = _library_inserts(pairs_by_key)
         library_median, library_mad = _median_mad(library)
         if library_median is None:
@@ -667,10 +832,13 @@ def run(args) -> None:
                   f"library insert ({library_median:,.0f} bp) of {bam_name}; few pairs "
                   "will bridge two breakpoints. Consider a larger -e.")
 
-        bridges = _bridging_pairs(pairs_by_key, regions_by_key, library_median, library_mad)
+        bridges = _bridging_pairs(
+            pairs_by_key, {k: w["region"] for k, w in windows.items()},
+            library_median, library_mad,
+        )
         with open(bridges_output, "a") as bf:
             for (locus, b1, b2), pairs in bridges.items():
-                chrom = regions_by_key[(locus, b1)][0]
+                chrom = windows[(locus, b1)]["region"][0]
                 for name, (read_start, pair) in pairs.items():
                     bf.write(
                         f"{bam_basename}\t{locus}\t{name}\t{chrom}:{read_start + 1}\t"
@@ -678,28 +846,68 @@ def run(args) -> None:
                         f"{pair.orientation}\t{pair.proper}\t{b1}-{b2}\n"
                     )
 
-        panels: list[dict] = []
+        # ---- Junction search ----
+        locus_pairs = _locus_pairs(windows, canonical_pairs)
+        junction_counts = None
+        if args.junction:
+            print(f"Searching junction reads for {bam_name}...")
+            matches, junction_counts = _junction_search(bam_file, windows, locus_pairs)
+            if getattr(args, "junction_fastq", False):
+                write_junction_reads_fastq(bam_file, matches, output_dir, bam_name)
+            else:
+                write_junction_reads_fasta(matches, output_dir, bam_name)
+
+        # ---- Evidence per breakpoint pair ----
+        refined_by_key: dict[tuple, tuple] = {}
+        pair_results = []
+        for locus, b1, b2 in locus_pairs:
+            ev, panel = _pair_evidence(
+                bam_name, locus, b1, b2, windows, bridges, junction_counts,
+                library_median, library_mad, args.sv_type,
+            )
+            evidence_rows.append(ev)
+            pair_results.append((locus, b1, b2, ev, panel))
+            for bkp, n in ((b1, 1), (b2, 2)):
+                if ev[f"bkp{n}_refined"] is not None:
+                    refined_by_key.setdefault((locus, bkp), (
+                        ev[f"bkp{n}_refined"], ev[f"bkp{n}_side"], ev["refined_by"]
+                    ))
+        for key, w in windows.items():
+            if key not in refined_by_key and w["clips"]:
+                refined_by_key[key] = (*_top_clip(w["clips"]), "softclips")
+        window_plots = {
+            key: {"title": f"{bam_name} | {key[0]} BKP {key[1]}", "clips": w["clips"],
+                  "predicted": w["predicted"], "refined": refined_by_key.get(key)}
+            for key, w in windows.items()
+        }
+
         if canonical_pairs:
-            for locus in dict.fromkeys(locus for locus, _ in pairs_by_key):
-                for b1, b2 in canonical_pairs:
-                    if (locus, b1) not in positions_by_key or (locus, b2) not in positions_by_key:
-                        continue
-                    panels.append({
-                        "locus": locus, "panel": f"{b1}-{b2}", "class": "bridging",
-                        "pairs": [p for _, p in bridges.get((locus, b1, b2), {}).values()],
-                        "size": abs(positions_by_key[(locus, b2)] - positions_by_key[(locus, b1)]),
-                    })
+            panels = [panel for *_, panel in pair_results]
         else:
+            panels = []
             for (locus, bkp), pairs in pairs_by_key.items():
-                panels.append({
+                panel = {
                     "locus": locus, "panel": str(bkp), "class": "discordant",
                     "pairs": [p for _, p in pairs.values()
                               if _is_discordant(p, library_median, library_mad)],
                     "size": None,
-                })
-        for panel in panels:
-            _finish_panel(panel, library_median, library_mad, args.sv_type)
+                }
+                _finish_panel(panel, library_median, library_mad, args.sv_type)
+                panels.append(panel)
         summary_rows.extend(_summary_rows(bam_name, library, library_mad, panels))
+
+        # ---- Per-BAM plots ----
+        if args.plot_insert and args.plot_mode in ("per-bam", "both") and panels:
+            _plot_insert_sizes(panels, f"{args.output}_{bam_name}_insert_dist.png")
+        if args.plot_softclip and args.plot_mode in ("per-bam", "both") and windows:
+            _plot_softclip_positions(list(window_plots.values()),
+                                     f"{args.output}_{bam_name}_softclip_dist.png")
+        if args.plot_evidence:
+            for locus, b1, b2, ev, panel in pair_results:
+                _plot_evidence(
+                    ev, (window_plots[(locus, b1)], window_plots[(locus, b2)]), panel,
+                    f"{args.output}_{bam_name}_{locus}_{b1}-{b2}_evidence.png",
+                )
 
         # Pooled accumulation
         if args.plot_mode in ("pooled", "both"):
@@ -711,80 +919,14 @@ def run(args) -> None:
                 )
                 pooled["pairs"].extend(panel["pairs"])
                 pooled["sizes"].append(panel["size"])
-            if canonical_pairs:
-                for key in canonical_pairs:
-                    b1, b2 = key
-                    pooled_softclip_by_pair.setdefault(key, [])
-                    pooled_softclip_by_pair[key].extend(softclip_positions_by_bkp.get(b1, []))
-                    pooled_softclip_by_pair[key].extend(softclip_positions_by_bkp.get(b2, []))
-            else:
-                for bkp, poss in softclip_positions_by_bkp.items():
-                    pooled_softclip_by_pair.setdefault((bkp,), []).extend(poss)
-
-        # ---- Junction search ----
-        # The search region is derived directly from the breakpoint windows
-        # already stored in regions_by_bkp — no need for a separate argument.
-        if args.junction:
-            print(f"Building automaton for {bam_name}...")
-            allowed_bkps = (
-                {b for pair in allowed_pairs for b in pair} if allowed_pairs else None
-            )
-            automaton = build_softclip_automaton(softclips_by_bkp, allowed_bkps)
-
-            # Use the union span of all relevant breakpoint regions as the
-            # fetch window so we catch reads spanning between breakpoints.
-            relevant_bkps = list(
-                (allowed_bkps or set(regions_by_bkp.keys()))
-                & set(regions_by_bkp.keys())
-            )
-            if relevant_bkps:
-                chroms = [regions_by_bkp[b][0] for b in relevant_bkps]
-                starts = [regions_by_bkp[b][1] for b in relevant_bkps]
-                ends   = [regions_by_bkp[b][2] for b in relevant_bkps]
-                # Only fetch as a single span when all breakpoints are on the
-                # same chromosome; otherwise scan each region individually.
-                if len(set(chroms)) == 1:
-                    search_regions = [(chroms[0], min(starts), max(ends))]
-                else:
-                    search_regions = list(regions_by_bkp.values())
-            else:
-                search_regions = list(regions_by_bkp.values())
-
-            all_matches = []
-            for i, search_region in enumerate(search_regions):
-                # unplaced unmapped reads are scanned once, with the first region
-                all_matches.extend(
-                    find_reads_with_multiple_softclips_aho(
-                        bam_file, automaton, search_region, allowed_pairs,
-                        include_unplaced=(i == 0),
-                    )
+            for key, w in window_plots.items():
+                pooled = pooled_windows.setdefault(
+                    key, {"clips": [], "predicted": [], "refined": []}
                 )
-
-            # Deduplicate by read name + breakpoint pair
-            seen_keys: set = set()
-            matches = []
-            for m in all_matches:
-                key = (m["read_name"], m["breakpoints"])
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    matches.append(m)
-
-            output_dir = os.path.dirname(args.output) or "."
-            if getattr(args, "junction_fastq", False):
-                write_junction_reads_fastq(bam_file, matches, output_dir, bam_name)
-            else:
-                write_junction_reads_fasta(matches, output_dir, bam_name)
-
-        # ---- Per-BAM plots ----
-        if args.plot_insert and args.plot_mode in ("per-bam", "both") and panels:
-            _plot_insert_sizes(panels, f"{args.output}_{bam_name}_insert_dist.png")
-
-        if args.plot_softclip and args.plot_mode in ("per-bam", "both"):
-            _plot_softclip_positions(
-                softclip_positions_by_bkp, bkp_to_expected_pos,
-                f"{args.output}_{bam_name}_softclip_dist.png",
-                bam_name=bam_name,
-            )
+                pooled["clips"].extend(w["clips"])
+                pooled["predicted"].append(w["predicted"])
+                if w["refined"] is not None:
+                    pooled["refined"].append(w["refined"])
 
     # ------------------------------------------------------------------
     # BLAST
@@ -810,20 +952,32 @@ def run(args) -> None:
         if args.plot_insert:
             print("Plotting pooled insert-size distributions by pair...")
             _plot_insert_sizes(panels, f"{args.output}_pooled_insert_dist_by_pair.png")
-        if args.plot_softclip and pooled_softclip_by_pair:
-            print("Plotting pooled softclip distributions by pair...")
-            _plot_softclip_positions(
-                pooled_softclip_by_pair, bkp_to_expected_pos,
-                f"{args.output}_pooled_softclip_dist_by_pair.png",
-                bam_name="pooled",
-                pair_keys=list(pooled_softclip_by_pair.keys()),
-            )
+    if args.plot_mode in ("pooled", "both") and args.plot_softclip and pooled_windows:
+        print("Plotting pooled softclip distributions...")
+        _plot_softclip_positions(
+            [{"title": f"pooled | {locus} BKP {bkp}", "clips": w["clips"],
+              "predicted": float(np.median(w["predicted"])),
+              "refined": Counter(w["refined"]).most_common(1)[0][0] if w["refined"] else None}
+             for (locus, bkp), w in pooled_windows.items()],
+            f"{args.output}_pooled_softclip_dist.png",
+        )
 
     summary_columns = ["bam", "locus", "panel", "class", "orientation", "n", "median",
                        "q1", "q3", "mad", "sv_type", "expected"]
     pd.DataFrame(summary_rows, columns=summary_columns).to_csv(
         summary_output, sep="\t", index=False, na_rep="NA", float_format="%.1f"
     )
+    evidence_columns = [
+        "bam", "locus", "pair", "chrom", "bkp1_predicted", "bkp2_predicted",
+        "bkp1_refined", "bkp1_side", "bkp2_refined", "bkp2_side", "refined_by",
+        "sv_type", "size", "split_reads", "split_reads_at_junction", "junction_reads",
+        "softclips_bkp1", "softclips_bkp2", "bridging_pairs", "pair_orientation",
+        "insert_median", "insert_expected",
+    ]
+    pd.DataFrame(evidence_rows, columns=evidence_columns).astype(
+        {c: "Int64" for c in ("bkp1_refined", "bkp2_refined", "size", "junction_reads")}
+    ).to_csv(evidence_output, sep="\t", index=False, na_rep="NA", float_format="%.0f")
     print(f"\nBridging pairs saved to {bridges_output}")
     print(f"Insert size summary saved to {summary_output}")
+    print(f"Junction evidence saved to {evidence_output}")
     print("Done.")

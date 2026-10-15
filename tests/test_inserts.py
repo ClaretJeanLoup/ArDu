@@ -6,7 +6,9 @@ Reference ``chr1`` (10 kb) with 100 bp reads in FR pairs, fragments of
       900 bp apart,
     - ``dup``: a 2 kb tandem duplication between 5,000 and 7,000, whose junction
       is crossed by 10 RF pairs,
-plus a duplicate and a MAPQ 0 copy of a deletion pair, which must be ignored.
+plus a duplicate and a MAPQ 0 copy of a deletion pair, which must be ignored,
+and 5 split reads at each junction: 2,000 | 2,601 for the deletion and
+7,000 | 5,001 for the duplication (1-based).
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import pytest
 
 from ardu.bam import read_pair_info
 from ardu.cli import junctions
+from ardu.cli.junctions import _clipped_end, _sv_geometry
 
 LEN, READ = 10_000, 100
 PAIRED, PROPER, REVERSE, MATE_REVERSE, READ1, READ2, DUP = 1, 2, 16, 32, 64, 128, 1024
@@ -46,6 +49,19 @@ def _pair(header, name, fwd_start, rev_start, proper=True, extra_flag=0, mapq=60
     return mates
 
 
+def _split(header, name, start, cigar, sa_pos, sa_cigar):
+    """An unpaired read at 0-based *start* whose clipped part aligns at 1-based *sa_pos*."""
+    a = pysam.AlignedSegment(header)
+    a.query_name = name
+    a.query_sequence = "C" * READ
+    a.query_qualities = pysam.qualitystring_to_array("I" * READ)
+    a.reference_id, a.reference_start = 0, start
+    a.mapping_quality = 60
+    a.cigarstring = cigar
+    a.set_tag("SA", f"chr1,{sa_pos},+,{sa_cigar},60,0;")
+    return a
+
+
 @pytest.fixture(scope="module")
 def paired(tmp_path_factory):
     d = tmp_path_factory.mktemp("paired")
@@ -61,6 +77,9 @@ def paired(tmp_path_factory):
         reads += _pair(header, f"dup{i}", 7_000 - a, 5_000 + 300 - a - READ, proper=False)
     reads += _pair(header, "del_dup", 1_950, 2_750, proper=False, extra_flag=DUP)
     reads += _pair(header, "del_mapq0", 1_950, 2_750, proper=False, mapq=0)
+    for i in range(5):
+        reads.append(_split(header, f"sdel{i}", 1_940, "60M40S", 2_601, "60H40M"))
+        reads.append(_split(header, f"sdup{i}", 6_950, "50M50S", 5_001, "50H50M"))
 
     reads.sort(key=lambda a: a.reference_start)
     bam = d / "sample.bam"
@@ -82,11 +101,13 @@ def paired(tmp_path_factory):
     args = parser.parse_args([
         "junctions", "-b", str(d / "bams.txt"), "-i", str(d / "bkp.tsv"),
         "-o", str(d / "out"), "-e", "200", "--pairs", "1-2", "--plot-insert",
+        "--plot-softclip", "--plot-evidence",
     ])
     args.func(args)
     return dict(dir=d, bam=bam, header=header,
                 summary=pd.read_csv(d / "out_insert_summary.tsv", sep="\t"),
-                bridges=pd.read_csv(d / "out_bridging_pairs.tsv", sep="\t"))
+                bridges=pd.read_csv(d / "out_bridging_pairs.tsv", sep="\t"),
+                evidence=pd.read_csv(d / "out_junction_summary.tsv", sep="\t").set_index("locus"))
 
 
 def test_pair_info_fr_and_rf(paired):
@@ -132,3 +153,27 @@ def test_bridging_pairs_listed_once_without_filtered_reads(paired):
     assert len(names) == 20
     assert not names.isin(["del_dup", "del_mapq0"]).any()
     assert (paired["dir"] / "out_sample_insert_dist.png").exists()
+
+
+def test_clipped_end_and_geometry():
+    assert _clipped_end(1_941, "60M40S") == (2_000, "R")
+    assert _clipped_end(2_601, "60H40M") == (2_601, "L")
+    assert _clipped_end(100, "100M") is None
+    assert _sv_geometry((2_000, "R"), (2_601, "L")) == ("deletion", 600)
+    assert _sv_geometry((7_000, "R"), (5_001, "L")) == ("duplication", 2_000)
+
+
+def test_junction_summary(paired):
+    ev = paired["evidence"]
+    for locus, b1, b2, sv_type, size, expected in (
+        ("del", 2_000, 2_601, "deletion", 600, 900),
+        ("dup", 5_001, 7_000, "duplication", 2_000, 1_700),
+    ):
+        row = ev.loc[locus]
+        assert (row["bkp1_refined"], row["bkp2_refined"]) == (b1, b2)
+        assert (row["refined_by"], row["sv_type"], row["size"]) == ("split_reads", sv_type, size)
+        assert (row["split_reads"], row["bridging_pairs"]) == (5, 10)
+        assert row["insert_expected"] == expected
+        assert row["junction_reads"] == "NA" or pd.isna(row["junction_reads"])
+    for plot in ("softclip_dist", "del_1-2_evidence", "dup_1-2_evidence"):
+        assert (paired["dir"] / f"out_sample_{plot}.png").exists()

@@ -90,14 +90,20 @@ def find_reads_with_multiple_softclips_aho(bam_file, automaton, region=None, all
     return results
 
 
+def pair_label(b1, b2):
+    """``1-2`` for plain breakpoint numbers, ``locus_1-2`` for ``(locus, number)`` keys."""
+    if isinstance(b1, tuple):
+        return f"{b1[0]}_{b1[1]}-{b2[1]}"
+    return f"{b1}-{b2}"
+
+
 def write_junction_reads_fasta(junction_reads, output_dir, bam_name):
     pair_to_fh = {}
     for r in junction_reads:
-        b1, b2 = r["breakpoints"]
-        key = f"{b1}-{b2}"
+        key = pair_label(*r["breakpoints"])
         if key not in pair_to_fh:
             pair_to_fh[key] = open(os.path.join(output_dir, f"{bam_name}_{key}_junction_reads.fasta"), "w")
-        pair_to_fh[key].write(f">{bam_name}:{r['read_name']}:{b1}-{b2}\n{r['capitalised_seq']}\n")
+        pair_to_fh[key].write(f">{bam_name}:{r['read_name']}:{key}\n{r['capitalised_seq']}\n")
     for fh in pair_to_fh.values():
         fh.close()
 
@@ -106,13 +112,12 @@ def write_junction_reads_fastq(bam_file, junction_reads, output_dir, bam_name):
     """Write junction reads as FASTQ from the sequences kept during the search (*bam_file* is not reread)."""
     pair_to_fh = {}
     for r in junction_reads:
-        b1, b2 = r["breakpoints"]
-        key = f"{b1}-{b2}"
+        key = pair_label(*r["breakpoints"])
         if key not in pair_to_fh:
             pair_to_fh[key] = open(os.path.join(output_dir, f"{bam_name}_{key}_junction_reads.fastq"), "w")
         seq = r["sequence"]
         quals = r["qualities"] if r["qualities"] is not None else [30] * len(seq)
         qual_str = "".join(chr(q + 33) for q in quals)
-        pair_to_fh[key].write(f"@{bam_name}:{r['read_name']}:{b1}-{b2}\n{seq}\n+\n{qual_str}\n")
+        pair_to_fh[key].write(f"@{bam_name}:{r['read_name']}:{key}\n{seq}\n+\n{qual_str}\n")
     for fh in pair_to_fh.values():
         fh.close()
