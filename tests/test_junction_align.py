@@ -72,9 +72,16 @@ def test_inserted_bases_against_expected(tmp_path):
 def test_reference_free_junction_from_split_reads(tmp_path):
     reads, junction = _junction_reads(_reference(), inserted="")
     # r0 starts 90 bp before the junction, so its 91st base is the first right of it
-    result = align_junction(reads, {"r0": 90}, None)
+    result = align_junction(reads, {"r0": (90, 90)}, None)
     assert result["stats"]["junction_depth"] == 8
     assert result["consensus"].upper() == junction[60:230]
     assert result["consensus_junction"] == 90
     marker, consensus = result["text"].splitlines()[:2]
     assert consensus[marker.index("|")] == junction[150]
+
+
+def test_reference_free_inserted_bases():
+    reads, _ = _junction_reads(_reference())
+    # r0: 90 bases of the left part, then GAT, then the right part
+    stats = align_junction(reads, {"r0": (90, 93), "r1": (80, 83)}, None)["stats"]
+    assert stats["inserted_bases"] == "GAT"

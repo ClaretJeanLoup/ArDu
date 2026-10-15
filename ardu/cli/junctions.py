@@ -8,6 +8,7 @@ subcommand with a ``register()`` / ``run()`` interface.
 
 from __future__ import annotations
 
+import itertools
 import math
 import os
 import re
@@ -305,10 +306,12 @@ def _soft_clip_length(cigartuples) -> int:
 
 
 def _split_read(read) -> tuple | None:
-    """Junction ends of a split read: ``(position, side, [(chrom, position, side), ...],
-    sequence, offset)`` for the primary alignment and each supplementary
-    alignment of its SA tag; *offset* is the index of the first base right of
-    the junction in the read sequence.
+    """Junction ends of a split read: ``(position, side, [(chrom, position, side,
+    offsets), ...], sequence)`` for the primary alignment and each supplementary
+    alignment of its SA tag. *offsets* is ``(left_end, right_start)``, the
+    index in the read where its left part ends and its right part starts (the
+    bases in between were inserted), or ``None`` when the two parts are on
+    different strands.
     """
     if (read.is_supplementary or not read.has_tag("SA")
             or not passes_read_filters(read)):
@@ -318,37 +321,44 @@ def _split_read(read) -> tuple | None:
         return None
     others = []
     for entry in read.get_tag("SA").rstrip(";").split(";"):
-        chrom, pos, _strand, cigar, mapq, _nm = entry.split(",")
+        chrom, pos, strand, cigar, mapq, _nm = entry.split(",")
         end = _clipped_end(int(pos), cigar)
-        if end is not None and int(mapq) >= bam_utils.MIN_MAPPING_QUALITY:
-            others.append((chrom, *end))
+        if end is None or int(mapq) < bam_utils.MIN_MAPPING_QUALITY:
+            continue
+        offsets = None
+        if (strand == "-") == read.is_reverse:
+            ops = [(int(n), op) for n, op in _CIGAR_RE.findall(cigar)]
+            sa_lead = sum(n for n, op in itertools.takewhile(lambda o: o[1] in "SH", ops))
+            sa_query = sum(n for n, op in ops if op in "MI=X")
+            if here[1] == "R":       # the primary is the left part
+                offsets = (read.query_length
+                           - _soft_clip_length(reversed(read.cigartuples)), sa_lead)
+            else:
+                offsets = (sa_lead + sa_query, _soft_clip_length(read.cigartuples))
+        others.append((chrom, *end, offsets))
     if not others:
         return None
-    if here[1] == "L":
-        offset = _soft_clip_length(read.cigartuples)
-    else:
-        offset = read.query_length - _soft_clip_length(reversed(read.cigartuples))
-    return (*here, others, read.query_sequence, offset)
+    return (*here, others, read.query_sequence)
 
 
 def _split_junctions(windows: dict, k1: tuple, k2: tuple) -> dict[tuple, list]:
     """Split reads joining windows *k1* and *k2*, grouped by junction
     ``(pos1, side1, pos2, side2)`` with the ends at *k1* first, as
-    ``{junction: [(read_id, sequence, offset), ...]}``. Each read counts once.
+    ``{junction: [(read_id, sequence, offsets), ...]}``. Each read counts once.
     """
     junctions: dict[tuple, list] = {}
     seen: set = set()
     for here, there in ((k1, k2), (k2, k1)):
         chrom, start, end = windows[there]["region"]
-        for read_id, (pos, side, others, seq, offset) in windows[here]["splits"].items():
+        for read_id, (pos, side, others, seq) in windows[here]["splits"].items():
             if read_id in seen:
                 continue
-            for o_chrom, o_pos, o_side in others:
+            for o_chrom, o_pos, o_side, offsets in others:
                 if o_chrom == chrom and start < o_pos <= end:
                     seen.add(read_id)
                     junction = ((pos, side, o_pos, o_side) if here == k1
                                 else (o_pos, o_side, pos, side))
-                    junctions.setdefault(junction, []).append((read_id, seq, offset))
+                    junctions.setdefault(junction, []).append((read_id, seq, offsets))
                     break
     return junctions
 
@@ -758,26 +768,113 @@ def _draw_sequence_panel(ax, alignment: dict, ev: dict, line_length: int = 100) 
     )
 
 
+_SEGMENT_COLOUR = "steelblue"
+_FLANK_COLOUR = "#bbbbbb"
+_BREAKPOINT_COLOUR = "darkred"
+
+
+def _draw_structure_panel(ax, ev: dict) -> None:
+    """Schematic of the reference and the sample around a deletion or a tandem
+    duplication (not to scale), with the junction and its sequence.
+    """
+    sv_type = ev["sv_type"]
+    ends = {side: pos for pos, side in ev["_ends"]} if ev.get("_ends") else {}
+    left = ev["bkp1_refined"] or ev["bkp1_predicted"]
+    right = ev["bkp2_refined"] or ev["bkp2_predicted"]
+    left, right = sorted((left, right))
+    flank, seg, h = 1.0, 3.0, 0.3
+    y_ref, y_sample = 1.0, 0.0
+
+    def block(x, width, y, colour, label="", hatch=None):
+        ax.add_patch(matplotlib.patches.FancyArrow(
+            x, y, width, 0, width=h, head_width=h, head_length=0.15,
+            length_includes_head=True, facecolor=colour, edgecolor="black",
+            linewidth=0.8, hatch=hatch,
+        ))
+        if label:
+            ax.text(x + width / 2 - 0.07, y, label, ha="center", va="center", fontsize=8,
+                    bbox=dict(facecolor="white", edgecolor="none", pad=1) if hatch else None)
+
+    def ribbon(x_ref, x_sample, width, colour):
+        ax.add_patch(matplotlib.patches.Polygon(
+            [(x_ref, y_ref - h / 2), (x_ref + width, y_ref - h / 2),
+             (x_sample + width, y_sample + h / 2), (x_sample, y_sample + h / 2)],
+            closed=True, facecolor=colour, alpha=0.15, edgecolor="none",
+        ))
+
+    size = f"{ev['size']:,} bp" if ev["size"] else f"~{right - left:,} bp"
+    # reference
+    block(0, flank, y_ref, _FLANK_COLOUR)
+    if sv_type == "duplication":
+        block(flank, seg, y_ref, _SEGMENT_COLOUR, f"duplicated segment ({size})")
+    else:
+        block(flank, seg, y_ref, "white", f"deleted segment ({size})", hatch="//")
+    block(flank + seg, flank, y_ref, _FLANK_COLOUR)
+    for x, pos in ((flank, left), (flank + seg, right)):
+        ax.plot([x, x], [y_ref - h, y_ref + h], color=_BREAKPOINT_COLOUR, linewidth=1.5)
+        ax.text(x, y_ref + h * 1.3, f"{pos:,}", ha="center", va="bottom", fontsize=8,
+                color=_BREAKPOINT_COLOUR)
+
+    # sample
+    block(0, flank, y_sample, _FLANK_COLOUR)
+    ribbon(0, 0, flank, _FLANK_COLOUR)
+    if sv_type == "duplication":
+        block(flank, seg, y_sample, _SEGMENT_COLOUR, "copy 1")
+        block(flank + seg, seg, y_sample, _SEGMENT_COLOUR, "copy 2")
+        ribbon(flank, flank, seg, _SEGMENT_COLOUR)
+        ribbon(flank, flank + seg, seg, _SEGMENT_COLOUR)
+        block(flank + 2 * seg, flank, y_sample, _FLANK_COLOUR)
+        ribbon(flank + seg, flank + 2 * seg, flank, _FLANK_COLOUR)
+        junction_x, x_max = flank + seg, 2 * flank + 2 * seg
+    else:
+        block(flank, flank, y_sample, _FLANK_COLOUR)
+        ribbon(flank + seg, flank, flank, _FLANK_COLOUR)
+        junction_x, x_max = flank, 2 * flank + seg
+
+    ax.plot([junction_x, junction_x], [y_sample - h, y_sample + h],
+            color=_BREAKPOINT_COLOUR, linewidth=2)
+    if set(ends) == {"L", "R"}:
+        inserted = ev.get("inserted_bases")
+        middle = f" | {inserted} | " if inserted else " | "
+        label = f"junction {ends['R']:,}{middle}{ends['L']:,}"
+        if ev.get("microhomology"):
+            label += f"  (microhomology {ev['microhomology']})"
+        ax.text(junction_x, y_sample - h * 1.3, label, ha="center", va="top", fontsize=8,
+                color=_BREAKPOINT_COLOUR)
+
+    ax.text(-0.15, y_ref, "reference", ha="right", va="center", fontsize=9)
+    ax.text(-0.15, y_sample, ev["bam"], ha="right", va="center", fontsize=9)
+    ax.set_xlim(-1.6, max(x_max, 2 * flank + seg) + 0.3)
+    ax.set_ylim(y_sample - 0.7, y_ref + 0.6)
+    ax.axis("off")
+    ax.set_title(f"{ev['chrom']}: {sv_type} (not to scale)", fontsize=10)
+
+
 def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
                    alignment: dict | None = None) -> None:
-    """Softclips at both breakpoints, bridging pair inserts and, when the
-    junction reads were aligned, the alignment around the junction and the
-    consensus sequence, with the evidence summarised in the title.
+    """The SV structure (for a deletion or a tandem duplication), softclips at
+    both breakpoints, bridging pair inserts and, when the junction reads were
+    aligned, the alignment around the junction and the consensus sequence, with
+    the evidence summarised in the title.
     """
+    structure = ev["sv_type"] in ("deletion", "duplication")
+    n_lines = math.ceil(len(alignment["consensus"]) / 100) if alignment else 0
+    heights = ([1.6] if structure else []) + [4.5, 4.5] + ([0.35 * n_lines + 1] if alignment else [])
+    fig = plt.figure(figsize=(14, sum(heights)))
+    grid = fig.add_gridspec(len(heights), 2, height_ratios=heights)
+    row = 0
+    if structure:
+        _draw_structure_panel(fig.add_subplot(grid[0, :]), ev)
+        row = 1
+    for col, w in enumerate(windows):
+        _draw_softclip_panel(fig.add_subplot(grid[row, col]), w["title"], w["clips"],
+                             w["predicted"], w["refined"])
     if alignment is None:
-        fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
+        _draw_insert_panel(fig.add_subplot(grid[row + 1, :]), panel)
     else:
-        n_lines = math.ceil(len(alignment["consensus"]) / 100)
-        fig = plt.figure(figsize=(14, 9 + 0.35 * n_lines + 1))
-        grid = fig.add_gridspec(3, 2, height_ratios=[4.5, 4.5, 0.35 * n_lines + 1])
-        axes = [fig.add_subplot(grid[r, c]) for r in (0, 1) for c in (0, 1)]
-        axes.append(fig.add_subplot(grid[2, :]))
-    for ax, w in zip(axes, windows):
-        _draw_softclip_panel(ax, w["title"], w["clips"], w["predicted"], w["refined"])
-    _draw_insert_panel(axes[2], panel)
-    if alignment is not None:
-        _draw_alignment_panel(axes[3], alignment)
-        _draw_sequence_panel(axes[4], alignment, ev)
+        _draw_insert_panel(fig.add_subplot(grid[row + 1, 0]), panel)
+        _draw_alignment_panel(fig.add_subplot(grid[row + 1, 1]), alignment)
+        _draw_sequence_panel(fig.add_subplot(grid[row + 2, :]), alignment, ev)
     fig.suptitle(_evidence_text(ev), fontsize=11, y=1.02)
     _save(output_path)
 
@@ -905,11 +1002,12 @@ def _junction_alignment(ev: dict, matches: list, k1: tuple, k2: tuple, fasta,
     MAFFT, write the alignment, and add its statistics to *ev*.
     """
     reads: dict[str, str] = {}
-    split_offsets: dict[str, int] = {}
-    for (name, is_read1), seq, offset in ev["_split_reads"]:
+    split_offsets: dict[str, tuple[int, int]] = {}
+    for (name, is_read1), seq, offsets in ev["_split_reads"]:
         read_id = f"{name}/{1 if is_read1 else 2}"
         reads[read_id] = seq
-        split_offsets[read_id] = offset
+        if offsets is not None:
+            split_offsets[read_id] = offsets
     known = set(reads.values())
     for m in matches:
         if set(m["breakpoints"]) == {k1, k2} and m["sequence"] not in known:
@@ -1216,7 +1314,10 @@ def run(args) -> None:
     pd.DataFrame(evidence_rows, columns=evidence_columns).astype(
         {c: "Int64" for c in ("bkp1_refined", "bkp2_refined", "size", "junction_reads",
                               "aligned_reads", "consensus_length", "junction_depth")}
-    ).to_csv(evidence_output, sep="\t", index=False, na_rep="NA", float_format="%.0f")
+        | {c: "Float64" for c in ("insert_median", "insert_expected")}
+    ).round({"insert_median": 0, "insert_expected": 0}).astype(
+        {"insert_median": "Int64", "insert_expected": "Int64"}
+    ).to_csv(evidence_output, sep="\t", index=False, na_rep="NA")
     print(f"\nBridging pairs saved to {bridges_output}")
     print(f"Insert size summary saved to {summary_output}")
     print(f"Junction evidence saved to {evidence_output}")

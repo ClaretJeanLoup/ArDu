@@ -154,22 +154,28 @@ def consensus_sequence(columns) -> str:
     )
 
 
-def junction_column(aligned: dict[str, str], expected_offset: int | None,
-                    split_offsets: dict[str, int]) -> int | None:
-    """Column of the first base right of the junction: from the expected row
-    when there is one, else the column most split reads put it at.
+def junction_columns(aligned: dict[str, str], expected_offset: int | None,
+                     split_offsets: dict[str, tuple[int, int]]) -> tuple[int | None, int | None]:
+    """Columns of the last base left of the junction and the first base right
+    of it, from the expected row when there is one, else the pair of columns
+    most split reads put them at. Bases between the two were inserted.
     """
     if EXPECTED in aligned and expected_offset is not None:
-        return _column_of_base(aligned[EXPECTED], expected_offset)
-    votes = Counter(
-        col for name, offset in split_offsets.items()
-        if name in aligned and (col := _column_of_base(aligned[name], offset)) is not None
-    )
-    return votes.most_common(1)[0][0] if votes else None
+        row = aligned[EXPECTED]
+        return _column_of_base(row, expected_offset - 1), _column_of_base(row, expected_offset)
+    votes = Counter()
+    for name, (left_end, right_start) in split_offsets.items():
+        if name not in aligned:
+            continue
+        left = _column_of_base(aligned[name], left_end - 1)
+        right = _column_of_base(aligned[name], right_start)
+        if left is not None and right is not None:
+            votes[(left, right)] += 1
+    return votes.most_common(1)[0][0] if votes else (None, None)
 
 
-def junction_stats(aligned: dict[str, str], columns, junction_col: int | None,
-                   expected_offset: int | None, window: int = 10) -> dict:
+def junction_stats(aligned: dict[str, str], columns, left_col: int | None,
+                   junction_col: int | None, window: int = 10) -> dict:
     """Depth and lowest agreement around the junction, inserted bases and
     identity of the consensus with the expected junction.
     """
@@ -183,15 +189,15 @@ def junction_stats(aligned: dict[str, str], columns, junction_col: int | None,
                 columns[max(0, junction_col - window):junction_col + window] if depth]
         stats["junction_agreement"] = round(min(near), 3) if near else None
 
-    expected = aligned.get(EXPECTED)
-    if expected is None:
-        return stats
-    left_col = _column_of_base(expected, expected_offset - 1)
     if left_col is not None and junction_col is not None:
         stats["inserted_bases"] = "".join(
             columns[c][0] for c in range(left_col + 1, junction_col)
-            if expected[c] == "-" and columns[c][0] not in ("", "-")
+            if columns[c][0] not in ("", "-")
         )
+
+    expected = aligned.get(EXPECTED)
+    if expected is None:
+        return stats
     compared = matches = 0
     for c, (symbol, depth, _) in enumerate(columns):
         if not depth or (symbol == "-" and expected[c] == "-"):
@@ -234,23 +240,24 @@ def alignment_text(aligned: dict[str, str], columns, junction_col: int | None) -
     return "\n".join(lines) + "\n"
 
 
-def align_junction(reads: dict[str, str], split_offsets: dict[str, int],
+def align_junction(reads: dict[str, str], split_offsets: dict[str, tuple[int, int]],
                    expected: tuple[str, int] | None) -> dict:
     """Align *reads* with MAFFT and summarise the junction.
 
-    *split_offsets* gives, for split reads, the index of their first base right
-    of the junction; *expected* is ``(sequence, left_length)`` or ``None``.
+    *split_offsets* gives, for split reads, the index in the read of the end of
+    its left part and of the start of its right part (the bases in between were
+    inserted); *expected* is ``(sequence, left_length)`` or ``None``.
     """
     expected_seq, expected_offset = expected if expected else (None, None)
     aligned = run_mafft(reads, expected_seq)
     columns = consensus_columns(aligned)
-    junction_col = junction_column(aligned, expected_offset, split_offsets)
+    left_col, junction_col = junction_columns(aligned, expected_offset, split_offsets)
     return {
         "aligned": aligned,
         "columns": columns,
         "junction_col": junction_col,
         "consensus": consensus_sequence(columns),
         "consensus_junction": consensus_index(columns, junction_col),
-        "stats": junction_stats(aligned, columns, junction_col, expected_offset),
+        "stats": junction_stats(aligned, columns, left_col, junction_col),
         "text": alignment_text(aligned, columns, junction_col),
     }

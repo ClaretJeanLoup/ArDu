@@ -256,7 +256,7 @@ For each pair of breakpoints (the `--pairs`, or every pair within a locus), the 
 - **SV type and size** from the side of the clips: left clips at the left breakpoint and right clips at the right one make a tandem duplication (size from first to last duplicated base), the opposite makes a deletion (size of the deleted segment). `--sv-type` overrides it; without split reads, the bridging pair orientation decides.
 - **junction reads** (with `--junction`), **softclips** per window and **bridging pairs** with their orientation, median and expected insert, the expected insert using the refined size.
 
-`--plot-evidence` draws one figure per sample and breakpoint pair: the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
+`--plot-evidence` draws one figure per sample and breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction and its sequence; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
 #### Junction sequence
 
