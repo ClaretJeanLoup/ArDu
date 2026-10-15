@@ -387,14 +387,19 @@ def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
         )
         orientations = [o for o in _ORIENTATION_COLOURS
                         if any(p.orientation == o for p in panel["pairs"])]
-        ax.hist(
+        counts, _, _ = ax.hist(
             [[p.insert for p in panel["pairs"] if p.orientation == o] for o in orientations],
             bins=bins, stacked=True, edgecolor="black",
             color=[_ORIENTATION_COLOURS[o] for o in orientations],
             label=[f"{o} (n={sum(p.orientation == o for p in panel['pairs'])})"
                    for o in orientations],
         )
-        ax.set_yscale("log")
+        # a log axis only helps when counts span orders of magnitude
+        log_y = np.max(counts) >= 20
+        if log_y:
+            ax.set_yscale("log")
+        else:
+            ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
 
         if panel["expected"] is not None:
             ax.axvline(
@@ -407,7 +412,7 @@ def _plot_insert_sizes(panels: list[dict], output_path: str) -> None:
             title += f"\nlibrary insert {panel['library_median']:,.0f} bp"
         ax.set_title(title, fontsize=10)
         ax.set_xlabel("Insert size (bp)", fontsize=9)
-        ax.set_ylabel("Count (log)", fontsize=9)
+        ax.set_ylabel("Count (log)" if log_y else "Count", fontsize=9)
         ax.xaxis.set_major_formatter(
             matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}")
         )
