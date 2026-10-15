@@ -1,0 +1,3 @@
+bam	locus	panel	class	orientation	n	median	q1	q3	mad	sv_type	expected
+Yop16-60	NA	all	library	FR	883	193.0	147.0	263.0	53.0	NA	NA
+Yop16-60	ace-1	1-2	bridging	RF	7	202534.0	202505.5	202647.0	NA	duplication	202716.0

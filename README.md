@@ -46,7 +46,7 @@ ardu coverage -b bamlist.txt -r regions.bed -n reference -o run1 \
   --plot png --breakpoint ruptures
 
 ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
-  -s 30 -e 1000 --pairs 1-2 --spanning-reads \
+  -s 30 -e 1000 --pairs 1-2 --junction \
   --blast reference.fa --plot-insert --plot-softclip \
   -o JunctionTest
 ```
@@ -55,41 +55,40 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 The ace-1 locus is known to be involved in insecticide resistance linked to a gene duplication in *Anopheles gambiae* mosquitoes. Using a wild-caught sample from Yopougon (Ivory Coast) we identified a large tandem duplication spanning ~203 kb overlapping the ace-1 locus and 9 other genes.
 
+The inputs are in `examples/ace1/`: the reads of this sample over AgamP4_2R:3.30-3.80 Mb (the duplication and its flanks) and AgamP4_X:8.040-8.065 Mb (the normalisation region), the region and plot beds, and AgamP4_2R up to 3.8 Mb as reference (original coordinates). Run the commands from that folder. The outputs shown below are in `docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/`.
+
 ### Step 1 — Coverage analysis and breakpoint detection
 
 ```bash
+cd examples/ace1
 ardu coverage -b bamlist.txt -n reference -r ace1.bed -o ArduExampleRun \
   --plot png --plot-interval ace1plot.bed --plot-slw 2500 --plot-bin 500 \
   --plot-target --plot-doclim 0.5 20 --plot-ylim 0 10 --plot-param \
   --breakpoint ruptures
 ```
 
-The normalised depth of coverage rises from ~1 to ~3 at breakpoint 1 (AgamP4_2R:3,437,186) and drops back at breakpoint 2 (AgamP4_2R:3,639,686), consistent with a heterozygous tandem duplication. The two predicted breakpoints are numbered in the same order as the `_breakpoints.tsv` output.
+The normalised depth of coverage rises from ~1 to ~2.2 at breakpoint 1 (AgamP4_2R:3,437,249) and drops back at breakpoint 2 (AgamP4_2R:3,640,152), consistent with a tandem duplication. The two predicted breakpoints are numbered in the same order as the `_breakpoints.tsv` output.
 
 <p align="center">
-  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/ace-1-plots/Yop16-60_ace-1_plot.png" width="800">
+  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/ace-1-plots/Yop16-60_ace-1_plot.png" width="800">
 </p>
 
 ### Step 2 — Junction evidence
 
 ```bash
-ardu junctions -b bamlist.txt \
-  -i ArDuRun-ArduExampleRun-2026-06-11/ArduExampleRun_breakpoints.tsv \
-  -s 30 -e 1000 --pairs 1-2 --spanning-reads \
-  --blast AgambiaeP4_Genome.fna --plot-insert --plot-softclip \
-  -o JunctionTest
+mkdir -p ArDuRun-ArduExampleRun-DATE/junctions
+ardu junctions -b bamlist.txt -i ArDuRun-ArduExampleRun-DATE \
+  -s 30 -e 1000 --pairs 1-2 --junction \
+  --blast AgamP4_2R_1-3800000.fa --plot-insert --plot-softclip --plot-evidence \
+  -o ArDuRun-ArduExampleRun-DATE/junctions/JunctionTest
 ```
 
-The softclip pileup confirms both breakpoints at base-pair resolution. The mode of soft-clipped reads at breakpoint 1 falls at position 3,436,927 (259 bp upstream of the coverage-based prediction and right on top of the breakpoint confirmed by Assogba et al., 2016) and at 3,640,306 for breakpoint 2 (620 bp downstream, 470 pb below the second breakpoint found in the previous study). Spanning reads containing softclip sequences from both breakpoints were recovered and written to `Yop16-60_1-2_junction_reads.fasta`.
+Fifteen split reads join the two breakpoints at the same junction, which refines them to AgamP4_2R:3,436,927 (left clips, first base of the duplicated segment, 322 bp upstream of the coverage prediction) and 3,639,835 (right clips, last base, 317 bp upstream). Both match the breakpoints confirmed by Assogba et al. (2016) to within 1 bp. The clip sides make it a tandem duplication of 202,909 bp. Seven read pairs bridge the junction, all in RF orientation as expected for a tandem duplication, and 13 reads contain the softclips of both breakpoints.
+
+Aligned with MAFFT, the 15 reads crossing the junction reconstruct 213 bp of it: the end of the copy is joined to its start through a single inserted G, next to 1 bp of microhomology (C), and the consensus matches the reference at 97.2% (a few SNPs of this wild sample against the PEST reference). The full evidence is in `JunctionTest_junction_summary.tsv` and drawn in one figure:
 
 <p align="center">
-  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/junctions/JunctionTest_Yop16-60_softclip_dist.png" width="800">
-</p>
-
-The insert-size distribution confirms the expected ~203 kb insert for bridging read pairs spanning the two breakpoints.
-
-<p align="center">
-  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-06-11/junctions/JunctionTest_Yop16-60_insert_dist.png" width="400">
+  <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/junctions/JunctionTest_Yop16-60_ace-1_1-2_evidence.png" width="900">
 </p>
 
 ---
@@ -270,7 +269,7 @@ All outputs are written to a `junctions/` subdirectory inside the existing `ArDu
 
 ```bash
 ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
-  -s 30 -e 1000 --pairs 1-2 --spanning-reads \
+  -s 30 -e 1000 --pairs 1-2 --junction \
   --blast reference.fa --plot-insert --plot-softclip \
   -o JunctionTest
 ```
@@ -286,8 +285,8 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `-e, --extension` | Region to search around each breakpoint (bp). | `30` |
 | `--blast` | Reference genome FASTA; triggers BLAST and hit filtering. | `None` |
 | `--pairs` | Restrict analysis to specific breakpoint pairs, e.g. `--pairs 1-2 3-4`. | `None` |
-| `--spanning-reads` | Find reads whose sequence physically spans the breakpoint junction. | `False` |
-| `--spanning-reads-fastq` | Write spanning reads as FASTQ instead of FASTA. | `False` |
+| `--junction` | Find reads whose sequence physically spans the breakpoint junction. | `False` |
+| `--junction-fastq` | Write spanning reads as FASTQ instead of FASTA. | `False` |
 | `--sv-type` | SV type used for the expected insert of bridging pairs: `auto`, `deletion` or `duplication`. `auto` picks the type the pair orientations support (FR: deletion, RF: tandem duplication), which assumes the SV is longer than the library insert. | `auto` |
 | `--plot-insert` | Plot insert-size distributions. | `False` |
 | `--plot-softclip` | Plot softclip pileup per breakpoint, left and right clips stacked, with predicted and refined positions. | `False` |
@@ -308,7 +307,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `*.tsv` | Per-read softclip details (position, CIGAR, mate position, insert size). |
 | `*_BLAST_results.txt` | Raw BLAST output (if `--blast` used). |
 | `*_BLAST_filtered_pairs.txt` | BLAST hits filtered to cross-breakpoint mappings. |
-| `{sample}_{locus}_1-2_junction_reads.fasta` | Reads spanning the junction (if `--spanning-reads` used). |
+| `{sample}_{locus}_1-2_junction_reads.fasta` | Reads spanning the junction (if `--junction` used). |
 | `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileups, left and right clips stacked, with predicted and refined breakpoint positions. |
 | `*_{sample}_{locus}_1-2_evidence.png` | Softclips at both breakpoints and bridging pair inserts, with the SV call and its evidence (if `--plot-evidence` used). |

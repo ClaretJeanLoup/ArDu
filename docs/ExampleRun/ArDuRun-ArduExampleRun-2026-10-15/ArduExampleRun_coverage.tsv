@@ -1,0 +1,11 @@
+# ArDu coverage outfile
+# Generated on: 2026-10-15 18:21
+# Format: uDoC;sdDoC;medDoC;CovBases;RCN
+# uDoC:     mean Depth of Coverage over the entire target span.
+# sdDoC:    standard deviation of Depth of Coverage.
+# medDoC:   median Depth of Coverage over the entire locus span.
+# CovBases: total number of covered bases on locus span.
+# RCN:      relative copy number (median depth of the locus / median depth of the normalisation locus, i.e. copies per normalisation-locus copy).
+locus	Yop16-60
+ace-1	76.5;13.0;77.0;3992;2.2
+reference	36.11;10.03;35.0;1958;1.0
