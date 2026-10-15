@@ -32,7 +32,7 @@ from ardu.junction_align import (
     align_junction,
     expected_junction,
     mafft_available,
-    microhomology,
+    microhomology_split,
 )
 from ardu.junctionlib import (
     build_softclip_automaton,
@@ -698,22 +698,86 @@ def _draw_alignment_panel(ax, alignment: dict, flank: int = 30, max_reads: int =
     )
 
 
+_SEQUENCE_COLOURS = {"left": "steelblue", "right": "darkorange", "inserted": "red",
+                     "microhomology": "mediumpurple", "low support": "#999999"}
+
+
+def _draw_sequence_panel(ax, alignment: dict, ev: dict, line_length: int = 100) -> None:
+    """The consensus sequence, wrapped, coloured by side of the junction, with
+    inserted bases, microhomology and weakly supported (lower case) bases marked.
+    """
+    seq, junction = alignment["consensus"], alignment["consensus_junction"]
+    inserted = len(alignment["stats"]["inserted_bases"] or "")
+    mh_left, mh_right = (len(x) for x in ev.get("_microhomology") or ("", ""))
+    n_lines = math.ceil(len(seq) / line_length)
+
+    def category(i: int) -> str:
+        if junction is None:
+            return "left"
+        if junction - inserted <= i < junction and inserted:
+            return "inserted"
+        if junction - inserted - mh_left <= i < junction - inserted or junction <= i < junction + mh_right:
+            return "microhomology"
+        return "left" if i < junction else "right"
+
+    for i, base in enumerate(seq):
+        x, y = i % line_length, -(i // line_length)
+        colour = _SEQUENCE_COLOURS["low support"] if base.islower() else _SEQUENCE_COLOURS[category(i)]
+        ax.text(x, y, base.upper(), family="monospace", fontsize=9, ha="center", va="center",
+                color=colour, fontweight="bold" if category(i) != "left" and category(i) != "right" else None)
+    for line in range(n_lines):
+        ax.text(-1.5, -line, f"{line * line_length + 1}", ha="right", va="center", fontsize=7,
+                color="#555555")
+    if junction is not None:
+        x, y = junction % line_length, -(junction // line_length)
+        ax.plot([x - 0.5, x - 0.5], [y - 0.45, y + 0.45], color="black", linewidth=1.5)
+
+    caption = ""
+    junction_ends = {side: pos for pos, side in ev["_ends"]} if ev.get("_ends") else {}
+    if junction is not None and set(junction_ends) == {"L", "R"}:
+        left_len = junction - inserted
+        right_len = len(seq) - junction
+        caption = (f"left of |: {ev['chrom']}:{junction_ends['R'] - left_len + 1:,}-"
+                   f"{junction_ends['R']:,}    right of |: {ev['chrom']}:"
+                   f"{junction_ends['L']:,}-{junction_ends['L'] + right_len - 1:,}")
+    ax.set_xlim(-6, line_length + 1)
+    ax.set_ylim(-n_lines + 0.4, 0.8)
+    ax.axis("off")
+    ax.set_title(f"Junction consensus ({len(seq)} bp)" + (f"\n{caption}" if caption else ""),
+                 fontsize=10)
+    shown = {"left", "right", "low support"}
+    if inserted:
+        shown.add("inserted")
+    if mh_left or mh_right:
+        shown.add("microhomology")
+    ax.legend(
+        handles=[matplotlib.patches.Patch(color=c, label=label)
+                 for label, c in _SEQUENCE_COLOURS.items() if label in shown],
+        fontsize=7, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=len(shown),
+        frameon=False,
+    )
+
+
 def _plot_evidence(ev: dict, windows: tuple[dict, dict], panel: dict, output_path: str,
                    alignment: dict | None = None) -> None:
     """Softclips at both breakpoints, bridging pair inserts and, when the
-    junction reads were aligned, the alignment around the junction, with the
-    evidence summarised in the title.
+    junction reads were aligned, the alignment around the junction and the
+    consensus sequence, with the evidence summarised in the title.
     """
     if alignment is None:
         fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
     else:
-        fig, axes = plt.subplots(2, 2, figsize=(14, 9))
-        axes = axes.reshape(-1)
+        n_lines = math.ceil(len(alignment["consensus"]) / 100)
+        fig = plt.figure(figsize=(14, 9 + 0.35 * n_lines + 1))
+        grid = fig.add_gridspec(3, 2, height_ratios=[4.5, 4.5, 0.35 * n_lines + 1])
+        axes = [fig.add_subplot(grid[r, c]) for r in (0, 1) for c in (0, 1)]
+        axes.append(fig.add_subplot(grid[2, :]))
     for ax, w in zip(axes, windows):
         _draw_softclip_panel(ax, w["title"], w["clips"], w["predicted"], w["refined"])
     _draw_insert_panel(axes[2], panel)
     if alignment is not None:
         _draw_alignment_panel(axes[3], alignment)
+        _draw_sequence_panel(axes[4], alignment, ev)
     fig.suptitle(_evidence_text(ev), fontsize=11, y=1.02)
     _save(output_path)
 
@@ -1029,7 +1093,9 @@ def run(args) -> None:
             )
             alignment = None
             if fasta is not None and ev["_ends"]:
-                ev["microhomology"] = microhomology(fasta, ev["chrom"], ev["_ends"])
+                ev["_microhomology"] = microhomology_split(fasta, ev["chrom"], ev["_ends"])
+                if ev["_microhomology"] is not None:
+                    ev["microhomology"] = "".join(ev["_microhomology"])
             if align_reads:
                 alignment = _junction_alignment(
                     ev, matches, (locus, b1), (locus, b2), fasta,

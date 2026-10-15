@@ -11,7 +11,13 @@ import random
 import pysam
 import pytest
 
-from ardu.junction_align import align_junction, expected_junction, mafft_available, microhomology
+from ardu.junction_align import (
+    align_junction,
+    expected_junction,
+    mafft_available,
+    microhomology,
+    microhomology_split,
+)
 
 pytestmark = pytest.mark.skipif(not mafft_available(), reason="mafft not installed")
 
@@ -47,6 +53,7 @@ def _junction_reads(ref, inserted="GAT", n=8):
 
 def test_microhomology(tmp_path):
     assert microhomology(_fasta(tmp_path, _reference("AC")), "chr1", ENDS) == "AC"
+    assert microhomology_split(_fasta(tmp_path, _reference("AC")), "chr1", ENDS) == ("AC", "")
     assert microhomology(_fasta(tmp_path, _reference()), "chr1", ENDS) == ""
 
 
@@ -68,5 +75,6 @@ def test_reference_free_junction_from_split_reads(tmp_path):
     result = align_junction(reads, {"r0": 90}, None)
     assert result["stats"]["junction_depth"] == 8
     assert result["consensus"].upper() == junction[60:230]
+    assert result["consensus_junction"] == 90
     marker, consensus = result["text"].splitlines()[:2]
     assert consensus[marker.index("|")] == junction[150]

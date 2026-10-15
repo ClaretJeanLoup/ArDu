@@ -264,7 +264,7 @@ With `--junction` and `--plot-evidence`, and [MAFFT](https://mafft.cbrc.jp/align
 
 Given a reference (`--reference`, or the `--blast` one), the reads are added onto the junction expected from the refined breakpoints (`--addfragments`), which gives the bases inserted at the junction, the identity of the consensus with the expected junction, and the microhomology (bases found on both sides, which leave the exact breakpoint ambiguous within them). Long inserted sequences show only as far as the reads cover them.
 
-The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn as a fourth panel of the evidence figure.
+The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn in the evidence figure: the reads around the junction, and the consensus sequence coloured by side of the junction, with inserted bases, microhomology and weakly supported bases marked and the coordinates of each side.
 
 All outputs are written to a `junctions/` subdirectory inside the existing `ArDuRun-*` output folder.
 

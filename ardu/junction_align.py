@@ -52,6 +52,12 @@ def microhomology(fasta, chrom: str, ends, max_len: int = 50) -> str | None:
     """Bases found on both sides of the junction, so that the breakpoint could
     sit anywhere within them; ``""`` when there are none.
     """
+    split = microhomology_split(fasta, chrom, ends, max_len)
+    return None if split is None else "".join(split)
+
+
+def microhomology_split(fasta, chrom: str, ends, max_len: int = 50) -> tuple[str, str] | None:
+    """The microhomology bases left and right of the junction as placed."""
     junction = _junction_ends(ends)
     if junction is None:
         return None
@@ -65,7 +71,7 @@ def microhomology(fasta, chrom: str, ends, max_len: int = 50) -> str | None:
     k_right = 0
     while k_right < min(len(left), len(right)) - m and left[m + k_right] == right[m + k_right]:
         k_right += 1
-    return right[m - k_left:m] + left[m:m + k_right]
+    return right[m - k_left:m], left[m:m + k_right]
 
 
 def run_mafft(reads: dict[str, str], expected: str | None = None) -> dict[str, str]:
@@ -130,6 +136,13 @@ def consensus_columns(aligned: dict[str, str]) -> list[tuple[str, int, float]]:
         symbol, n = counts.most_common(1)[0]
         columns.append((symbol, depth, n / depth))
     return columns
+
+
+def consensus_index(columns, column: int | None) -> int | None:
+    """Index in the consensus sequence of the base at alignment *column*."""
+    if column is None:
+        return None
+    return sum(symbol not in ("", "-") for symbol, _, _ in columns[:column])
 
 
 def consensus_sequence(columns) -> str:
@@ -237,6 +250,7 @@ def align_junction(reads: dict[str, str], split_offsets: dict[str, int],
         "columns": columns,
         "junction_col": junction_col,
         "consensus": consensus_sequence(columns),
+        "consensus_junction": consensus_index(columns, junction_col),
         "stats": junction_stats(aligned, columns, junction_col, expected_offset),
         "text": alignment_text(aligned, columns, junction_col),
     }
