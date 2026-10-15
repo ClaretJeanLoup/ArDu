@@ -75,3 +75,10 @@ def test_rcn_interval(synthetic, tmp_path):
 def test_no_interval_by_default(synthetic, tmp_path):
     rcn = read_rcn(run_coverage(synthetic, tmp_path))
     assert len(rcn["dup"]) == 5
+
+
+def test_rerun_gets_new_directory(synthetic, tmp_path):
+    first = run_coverage(synthetic, tmp_path)
+    second = run_coverage(synthetic, tmp_path)
+    assert first != second and second.endswith("_2")
+    assert os.path.exists(os.path.join(first, "test_coverage.tsv"))

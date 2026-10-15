@@ -548,8 +548,15 @@ def run(args) -> None:
     date_str = time.strftime("%Y-%m-%d")
     ArDuBase = os.path.splitext(os.path.basename(args.outfile))[0]
     ArDuBaseRun = f"{ArDuBase}-{date_str}"
-    output_dir = f"ArDuRun-{ArDuBaseRun}/"
-    os.makedirs(output_dir, exist_ok=True)
+    # a rerun with the same prefix on the same day gets a numbered suffix instead of overwriting
+    output_dir = f"ArDuRun-{ArDuBaseRun}"
+    k = 2
+    while os.path.exists(output_dir):
+        output_dir = f"ArDuRun-{ArDuBaseRun}_{k}"
+        k += 1
+    output_dir += "/"
+    os.makedirs(output_dir)
+    print(f"Output directory: {output_dir}")
 
     with open(args.bam) as fh:
         bam_files = fh.read().splitlines()
