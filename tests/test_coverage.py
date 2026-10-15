@@ -40,3 +40,21 @@ def test_min_mapq_default_and_option(synthetic, tmp_path):
     assert float(default["lowmapq"][4]) == 0.75            # MAPQ 0 reads dropped by default (MAPQ >= 20)
     assert float(lowered["lowmapq"][4]) == 1.0             # and kept with --min-mapq 0
     assert float(lowered["dup"][4]) == 2.0
+
+
+def test_mutation_indels_and_runs(synthetic, tmp_path):
+    (tmp_path / "mut.tsv").write_text("chr1\t12000\thomopolymer\nchr1\t3000\tplain\n")
+    run_dir = run_coverage(synthetic, tmp_path, "--mutation", str(tmp_path / "mut.tsv"), "--mutation-indels")
+    rows = {l.split("\t")[0]: l.rstrip("\n").split("\t")[1] for l in open(os.path.join(run_dir, "test_mutations.tsv"))}
+    hp = dict(kv.split("=") for kv in rows["chr1:12000:homopolymer"].split(";"))
+    assert hp["ins"] == "8" and hp["del"] == "0"
+    assert hp["runs"] == "T8:12,T9:3,T10:5"
+    plain = dict(kv.split("=") for kv in rows["chr1:3000:plain"].split(";"))
+    assert plain["ins"] == "0" and plain["del"] == "0"
+
+
+def test_mutation_output_unchanged_without_flag(synthetic, tmp_path):
+    (tmp_path / "mut.tsv").write_text("chr1\t3000\tplain\n")
+    run_dir = run_coverage(synthetic, tmp_path, "--mutation", str(tmp_path / "mut.tsv"))
+    cell = open(os.path.join(run_dir, "test_mutations.tsv")).read().splitlines()[1].split("\t")[1]
+    assert [kv.split("=")[0] for kv in cell.split(";")] == ["A", "T", "C", "G", "depth"]

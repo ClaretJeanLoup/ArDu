@@ -20,6 +20,7 @@ import pysam
 
 from ardu.bam import (
     calculate_coverage_stats,
+    calculate_indel_counts,
     configure_read_filters,
     calculate_nucleotide_counts,
     depth_over_region,
@@ -161,6 +162,11 @@ def register(subparsers) -> None:
     parser.add_argument("--mutation",
                         help="Tab-delimited file: chromosome, position, [mutation_name].  "
                              "Returns per-nucleotide read counts.")
+    parser.add_argument("--mutation-indels", action="store_true",
+                        help="With --mutation, also count reads with an insertion or a "
+                             "deletion right after each position (VCF-style anchor) and "
+                             "the length of the homopolymer run that follows it in each "
+                             "read, e.g. ins=8;del=0;runs=T8:12,T9:3,T10:5.")
 
     parser.set_defaults(func=run)
 
@@ -669,6 +675,10 @@ def run(args) -> None:
                             "G": nucleotide_counts["G"],
                             "depth": total_depth,
                         }
+                        if args.mutation_indels:
+                            mutation_data[mutation_id][bam_file].update(
+                                calculate_indel_counts(bam_file, chromosome, position)
+                            )
                     except Exception as exc:
                         print(f"Error processing {mutation_id} in {bam_file}: {exc}")
                         mutation_data[mutation_id][bam_file] = {
@@ -682,11 +692,18 @@ def run(args) -> None:
                 row = [mutation_id]
                 for bam_file in bam_files:
                     c = bam_counts.get(bam_file, {})
-                    row.append(
+                    cell = (
                         f"A={c.get('A','NA')};T={c.get('T','NA')};"
                         f"C={c.get('C','NA')};G={c.get('G','NA')};"
                         f"depth={c.get('depth','NA')}"
                     )
+                    if args.mutation_indels:
+                        runs = c.get("runs") or {}
+                        run_str = ",".join(
+                            f"{k}:{v}" for k, v in sorted(runs.items(), key=lambda kv: (kv[0][0], int(kv[0][1:])))
+                        ) or "NA"
+                        cell += f";ins={c.get('ins','NA')};del={c.get('del','NA')};runs={run_str}"
+                    row.append(cell)
                 out_file.write("\t".join(row) + "\n")
         print(f"Mutation data saved to {mut_out}")
 

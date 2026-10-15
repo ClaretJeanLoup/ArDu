@@ -197,6 +197,48 @@ def calculate_nucleotide_counts(
     return counts, sum(counts.values())
 
 
+def calculate_indel_counts(
+    bam_file: str,
+    chromosome: str,
+    position: int | str,
+    anchor: int = 5,
+) -> dict[str, object]:
+    """Indels and homopolymer run lengths right after *position* (1-based, VCF-style anchor).
+
+    Returns ``ins`` and ``del``, the reads with an insertion or a deletion
+    starting after *position*, and ``runs``, a ``{"T8": n, ...}`` count of the
+    run of identical bases that follows *position* in each read, kept only when
+    the read extends at least *anchor* bases past the run. Reads pass the same
+    mapping quality and flag filters as the depth computation.
+    """
+    pos0 = int(position) - 1
+    ins = dele = 0
+    runs: dict[str, int] = {}
+    with pysam.AlignmentFile(bam_file, "rb") as samfile:
+        for column in samfile.pileup(
+            chromosome, pos0, pos0 + 1, truncate=True, stepper="nofilter",
+            min_base_quality=0, max_depth=10_000_000,
+        ):
+            for pr in column.pileups:
+                read = pr.alignment
+                if not passes_read_filters(read) or pr.is_del or pr.is_refskip:
+                    continue
+                if pr.indel > 0:
+                    ins += 1
+                elif pr.indel < 0:
+                    dele += 1
+                seq, q = read.query_sequence, pr.query_position + 1
+                if seq is None or q >= len(seq):
+                    continue
+                base, end = seq[q], q
+                while end < len(seq) and seq[end] == base:
+                    end += 1
+                if len(seq) - end >= anchor:
+                    key = f"{base}{end - q}"
+                    runs[key] = runs.get(key, 0) + 1
+    return {"ins": ins, "del": dele, "runs": runs}
+
+
 # ---------------------------------------------------------------------------
 # Coverage statistics across loci
 # ---------------------------------------------------------------------------
