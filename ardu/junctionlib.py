@@ -91,7 +91,10 @@ def find_reads_with_multiple_softclips_aho(bam_file, automaton, region=None, all
 
 
 def pair_label(b1, b2):
-    """``1-2`` for plain breakpoint numbers, ``locus_1-2`` for ``(locus, number)`` keys."""
+    """``1-2`` for plain breakpoint numbers, ``locus_1-2`` for ``(locus, number)``
+    keys, the lower breakpoint first whatever the order the clips came in.
+    """
+    b1, b2 = sorted((b1, b2))
     if isinstance(b1, tuple):
         return f"{b1[0]}_{b1[1]}-{b2[1]}"
     return f"{b1}-{b2}"

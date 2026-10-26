@@ -11,6 +11,7 @@ Corresponds to the original ArDu_1_1.py, refactored into:
 from __future__ import annotations
 
 import os
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -56,7 +57,8 @@ def register(subparsers) -> None:
     parser.add_argument("-n", "--norm", required=True,
                         help="Name of the normalisation locus in the region file.")
     parser.add_argument("-o", "--outfile", required=True,
-                        help="Prefix for output file names.")
+                        help="Prefix for output file names. The run folder is created in "
+                             "the prefix's directory (current directory if none).")
 
     # Read filters
     parser.add_argument("--min-mapq", type=int, default=None,
@@ -554,11 +556,16 @@ def run(args) -> None:
     date_str = time.strftime("%Y-%m-%d")
     ArDuBase = os.path.splitext(os.path.basename(args.outfile))[0]
     ArDuBaseRun = f"{ArDuBase}-{date_str}"
+    # the run folder goes next to the -o prefix, so -o can point to another directory
+    out_parent = os.path.dirname(args.outfile)
+    out_name = os.path.basename(args.outfile)
+    if out_parent and not os.path.isdir(out_parent):
+        sys.exit(f"Output directory does not exist: {out_parent}")
     # a rerun with the same prefix on the same day gets a numbered suffix instead of overwriting
-    output_dir = f"ArDuRun-{ArDuBaseRun}"
+    output_dir = os.path.join(out_parent, f"ArDuRun-{ArDuBaseRun}")
     k = 2
     while os.path.exists(output_dir):
-        output_dir = f"ArDuRun-{ArDuBaseRun}_{k}"
+        output_dir = os.path.join(out_parent, f"ArDuRun-{ArDuBaseRun}_{k}")
         k += 1
     output_dir += "/"
     os.makedirs(output_dir)
@@ -662,7 +669,7 @@ def run(args) -> None:
         cols = ["locus"] + [b for b in bam_names_without_ext if b in pivot_df.columns]
         pivot_df = pivot_df[cols]
 
-        cov_out = os.path.join(output_dir, f"{args.outfile}_coverage.tsv")
+        cov_out = os.path.join(output_dir, f"{out_name}_coverage.tsv")
         with open(cov_out, "w") as fh:
             fh.write("# ArDu coverage outfile\n")
             fh.write(f"# Generated on: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}\n")
@@ -689,7 +696,7 @@ def run(args) -> None:
     # ------------------------------------------------------------------
     if breakpoints_data:
         bp_df = pd.DataFrame(breakpoints_data)
-        bp_out = os.path.join(output_dir, f"{args.outfile}_breakpoints.tsv")
+        bp_out = os.path.join(output_dir, f"{out_name}_breakpoints.tsv")
         bp_df.to_csv(bp_out, sep="\t", index=False)
         print(f"Breakpoints data saved to {bp_out}")
 
@@ -728,7 +735,7 @@ def run(args) -> None:
                             "A": "NA", "T": "NA", "C": "NA", "G": "NA", "depth": "NA"
                         }
 
-        mut_out = os.path.join(output_dir, f"{args.outfile}_mutations.tsv")
+        mut_out = os.path.join(output_dir, f"{out_name}_mutations.tsv")
         with open(mut_out, "w") as out_file:
             out_file.write("mutation_id\t" + "\t".join(bam_files) + "\n")
             for mutation_id, bam_counts in mutation_data.items():

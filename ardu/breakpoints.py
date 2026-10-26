@@ -38,13 +38,23 @@ def binned_signal(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     return means, starts.to_numpy()
 
 
+def noise_sigma(signal: np.ndarray, lag: int = 4) -> float:
+    """Noise of a binned depth *signal* from the differences between bins *lag*
+    apart (robust, MAD). Over several kb it includes the depth wobbles that
+    repeats and mappability add to the counting noise, so the penalty then
+    suits both shallow and deep samples; for pure counting noise it equals the
+    estimate from consecutive bins.
+    """
+    lag = min(lag, len(signal) - 1)
+    diffs = signal[lag:] - signal[:-lag]
+    return 1.4826 * np.median(np.abs(diffs - np.median(diffs))) / np.sqrt(2)
+
+
 def scaled_penalty(signal: np.ndarray, pen: float) -> float:
     """*pen* times sigma squared times log(n), sigma being the noise of
-    *signal* estimated from the differences between consecutive values.
+    *signal* (:func:`noise_sigma`).
     """
-    diffs = np.diff(signal)
-    sigma = 1.4826 * np.median(np.abs(diffs - np.median(diffs))) / np.sqrt(2)
-    return pen * sigma ** 2 * np.log(len(signal))
+    return pen * noise_sigma(signal) ** 2 * np.log(len(signal))
 
 
 def refine_breakpoint(norm: np.ndarray, start: int, end: int, min_size: int = 50) -> int:
@@ -137,7 +147,7 @@ def _pooled_penalty_breakpoints(
     """Pooled breakpoints with a penalty instead of a set number.
 
     Each sample's mean normalised depth per :data:`PENALTY_BIN` bp bin (bins
-    shared by all samples) is divided by its noise (see :func:`scaled_penalty`),
+    shared by all samples) is divided by its noise (:func:`noise_sigma`),
     and a breakpoint is kept when it lowers the summed cost by more than
     ``pen * n_samples * log(n_bins)``, the single-sample penalty summed over
     samples. Each breakpoint is then refined in every sample as in
@@ -147,9 +157,7 @@ def _pooled_penalty_breakpoints(
     for _bam_name, d, _span in sample_list:
         pos_col = "base_pos" if "base_pos" in d.columns else "pos"
         means = d["norm"].groupby(d[pos_col] // PENALTY_BIN).mean()
-        diffs = np.diff(means.to_numpy())
-        sigma = 1.4826 * np.median(np.abs(diffs - np.median(diffs))) / np.sqrt(2)
-        columns.append(means / (sigma or 1.0))
+        columns.append(means / (noise_sigma(means.to_numpy()) or 1.0))
     matrix = pd.concat(columns, axis=1).sort_index().interpolate(limit_direction="both")
     bins = matrix.index.to_numpy()
     if len(bins) < 4:
