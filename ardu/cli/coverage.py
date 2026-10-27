@@ -85,6 +85,9 @@ def register(subparsers) -> None:
     parser.add_argument("--norm-gc", choices=["match", "any"], default="match",
                         help="'match': keep windows within 2 GC points of the median GC of the "
                              "loci; 'any': no GC selection.")
+    parser.add_argument("--norm-ignore", nargs="+", metavar="LOCUS", default=[],
+                        help="Loci of the region file left out of the GC the windows match "
+                             "(e.g. an old reference locus).")
     parser.add_argument("--norm-exclude", metavar="BED",
                         help="BED of regions the windows must avoid (known CNVs, repeats).")
     parser.add_argument("--norm-chroms", nargs="+", metavar="CONTIG",
@@ -597,11 +600,15 @@ def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> st
             sys.exit("--norm-random needs --fasta to draw the windows.")
         if NORM_RANDOM in regions_dict:
             sys.exit(f"The region file already has a locus named {NORM_RANDOM}.")
+        unknown = [name for name in args.norm_ignore if name not in regions_dict]
+        if unknown:
+            sys.exit(f"--norm-ignore loci not in the region file: {', '.join(unknown)}")
         target_gc = None
         if args.norm_gc == "match":
-            gcs = [g for g, _ in loci_gc(args.fasta, regions_dict).values() if not np.isnan(g)]
+            targets = {k: v for k, v in regions_dict.items() if k not in args.norm_ignore}
+            gcs = [g for g, _ in loci_gc(args.fasta, targets).values() if not np.isnan(g)]
             if not gcs:
-                sys.exit("No locus of the region file is in the fasta, so no GC to match.")
+                sys.exit("No locus left to match in the fasta, so no GC to match.")
             target_gc = float(np.median(gcs))
         exclude = [
             (chrom, s - args.norm_margin, e + args.norm_margin)
@@ -624,7 +631,9 @@ def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> st
         print(f"Normalisation windows saved to {bed}")
         regions_dict[NORM_RANDOM] = [f"{c}:{s + 1}-{e}" for c, s, e in windows]
         args.norm = NORM_RANDOM
-        gc_note = f", GC {target_gc:.3f} +/- 0.02 (median of the loci)" if target_gc is not None else ""
+        ignored = f" but {', '.join(args.norm_ignore)}" if args.norm_ignore else ""
+        gc_note = (f", GC {target_gc:.3f} +/- 0.02 (median of the loci{ignored})"
+                   if target_gc is not None else "")
         note = (f"{len(windows)} random windows of {args.norm_size} bp{gc_note}, "
                 f"seed {args.norm_seed}, in {os.path.basename(bed)}")
     elif os.path.isfile(args.norm):

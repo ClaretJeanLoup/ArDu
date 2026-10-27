@@ -98,6 +98,20 @@ def test_random_windows_give_the_same_rcn(synthetic, tmp_path):
     assert "norm_random" in open(os.path.join(run_dir, "test_gc.tsv")).read()
 
 
+def test_norm_ignore_leaves_a_locus_out_of_the_gc_match(synthetic, tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    args = ("--fasta", str(synthetic["fasta"]), *RANDOM_ARGS[2:])
+    _, all_loci = run(synthetic, tmp_path / "a", *args, norm=RANDOM_ARGS[:2])
+    out, ignored = run(synthetic, tmp_path / "b", *args, "--norm-ignore", "norm", norm=RANDOM_ARGS[:2])
+    assert out.returncode == 0, out.stderr
+    header = lambda d: next(l for l in open(os.path.join(d, "test_coverage.tsv")) if "Normalisation" in l)
+    assert "but norm" in header(ignored) and "but" not in header(all_loci)
+    assert "norm\t" in open(os.path.join(ignored, "test_gc.tsv")).read()     # still reported
+    out, _ = run(synthetic, tmp_path, *args, "--norm-ignore", "absent", norm=RANDOM_ARGS[:2])
+    assert out.returncode != 0 and "absent" in out.stderr
+
+
 def test_windows_reused_with_n(synthetic, tmp_path):
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()

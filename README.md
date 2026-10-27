@@ -164,6 +164,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--norm-size` | Size (bp) of the random windows. | `1000` |
 | `--norm-gc` | `match`: keep windows within 2 GC points of the median GC of the loci; `any`: no GC selection. | `match` |
 | `--norm-chroms` | Contigs to draw windows from, e.g. the autosomes. | contigs of at least 1 Mb |
+| `--norm-ignore` | Loci of the region file left out of the GC the windows match, e.g. an old reference locus. They are still reported and kept at `--norm-margin`. | `None` |
 | `--norm-exclude` | BED of regions the windows must avoid (known CNVs, repeats). | `None` |
 | `--norm-margin` | Distance (bp) kept between the windows and every locus of the region file. | `50000` |
 | `--norm-seed` | Random seed of the window draw. | `1` |
