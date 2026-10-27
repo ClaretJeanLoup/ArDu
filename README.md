@@ -174,7 +174,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `-o, --outfile` | Prefix for output file names. | |
 | **GC check and random normalisation windows** | | |
 | `--fasta` | Reference fasta (indexed) of the bams. Writes `_gc.tsv` with the GC of each locus and of the normalisation, and warns when they differ by more than `--gc-warn` points. | `None` |
-| `--gc-warn` | GC difference (percentage points) above which a locus is flagged. At 55-60% GC, depth changes by about 0.5% per point in a typical library and up to 5% in a steep one. | `3` |
+| `--gc-warn` | GC difference (percentage points) above which a locus is flagged. At 55-60% GC, depth changes by about 0.5% per point in a typical library and up to 5% in biaised one. | `3` |
 | `--norm-random` | Normalise on N random windows instead of a locus (needs `--fasta`). The windows are written to `_norm_windows.bed`; pass that file to `-n` to reuse them. | `None` |
 | `--norm-size` | Size (bp) of the random windows. | `1000` |
 | `--norm-gc` | `match`: keep windows within 2 GC points of the median GC of the loci; `any`: no GC selection. | `match` |
@@ -461,10 +461,9 @@ The choice of reference is critical. A wide range of genomic intervals can be us
 
 RCN is the median depth of the locus divided by the median depth of the normalisation locus, so it counts copies per copy of the normalisation locus. With a single copy gene of a diploid genome as reference, RCN = 1 means two copies per cell; multiply by two for copies per diploid cell. Use `--rcn-ci` to judge whether a value differs from 1.
 
-**GC content.** PCR during library preparation makes depth depend on the GC of the fragments, and the shape of that dependence differs between libraries: some lose depth in GC-rich sequence, others gain. When a locus and its reference differ in GC, RCN carries that bias, and it differs between samples. Exons are GC-rich (in AgamP4, median 53% GC against 45% for the genome), so a GC-rich reference gene can be off for typical targets. Give `--fasta` to get the GC of every locus in `_gc.tsv`, with a warning above `--gc-warn` points. GC is measured on the regions padded by 100 bp, since the fragments covering a base mostly overlap its close neighbours. Small differences can matter in a strongly biased library: in the most biased of 55 *An. gambiae* libraries, ace-1 and its reference differ by 3.6 points, and the RCN was 50% higher than with random windows matched to ace-1 (2.25 against 1.50).
+**GC content.** PCR during library preparation makes depth depend on the GC of the fragments, and the shape of that dependence differs between libraries: some lose depth in GC-rich sequence, others gain. When a locus and its reference differ in GC, RCN carries that bias, and it differs between samples. Exons are GC-rich (in AgamP4, median 53% GC against 45% for the genome), so a GC-rich reference gene can be off for typical targets. Give `--fasta` to get the GC of every locus in `_gc.tsv`, with a warning above `--gc-warn` points. 
 
-**Random windows as reference.** `--norm-random 1000` replaces the reference locus by 1,000 windows of 1 kb drawn at random, away from the loci (`--norm-margin`) and from `--norm-exclude`, and matched to the median GC of the loci. A window falling in a duplication or deletion barely moves the median over 1,000 windows. Restrict them with `--norm-chroms` to the autosomes: a reference on a sex chromosome halves its depth in the heterogametic sex and doubles every RCN (in *An. gambiae* males, the ace-1 RCN against an X-linked gene came out at 3.5 to 4.8, against 1.4 to 2.3 with autosomal windows). The windows cost about 5 s per bam. To compare runs, reuse the same windows: `-n ArDuRun-run1-<date>/run1_norm_windows.bed`.
-
+**Random windows as reference.** `--norm-random 1000` replaces the reference locus by 1,000 windows of 1 kb drawn at random, away from the loci (`--norm-margin`) and from `--norm-exclude`, and matched to the median GC of the loci. A window falling in a duplication or deletion barely moves the median over 1,000 windows. Restrict them with `--norm-chroms` to the autosomes.
 Reads in identical paralog copies present in the reference get MAPQ 0 and are dropped by the default `--min-mapq 20`, which flattens the depth of such duplications. Lower `--min-mapq` (e.g. to 0) when the reference contains both copies.
 
 ArDu is specifically designed around a candidate locus approach. While it can handle large numbers of targets, it is not its intended use, so expect long run times and reduced usability at genome wide scale.
@@ -474,6 +473,4 @@ ArDu is specifically designed around a candidate locus approach. While it can ha
 ## Reference
 If you use ArDu, please cite:
 Claret Jean-Loup, Mestre Camille, Milesi Pascal and Labbé Pierrick, *in prep*.
-**DOI (all versions, resolves to the latest):** [10.5281/zenodo.14922763](https://doi.org/10.5281/zenodo.14922763)
-
-To cite the exact version you used, take its own DOI from the Zenodo record ("Versions" panel), and give the version number in your methods (`pip show ardu`).
+**DOI:** [10.5281/zenodo.14922763](https://doi.org/10.5281/zenodo.14922763)
