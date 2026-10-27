@@ -117,6 +117,11 @@ Or directly without cloning:
 pip install git+https://github.com/ClaretJeanLoup/ArDu.git
 ```
 
+Both install the latest code on `main`. To install a given release, add its tag:
+```bash
+pip install git+https://github.com/ClaretJeanLoup/ArDu.git@v2.1.0
+```
+
 ### With conda:
 `environment.yml` holds a minimal environment (the dependencies below, plus BLAST for `--blast` and pytest for the tests) and installs ArDu from the clone:
 ```bash
@@ -469,4 +474,6 @@ ArDu is specifically designed around a candidate locus approach. While it can ha
 ## Reference
 If you use ArDu, please cite:
 Claret Jean-Loup, Mestre Camille, Milesi Pascal and Labbé Pierrick, *in prep*.
-**DOI:** [10.5281/zenodo.14922764](https://doi.org/10.5281/zenodo.14922764)
+**DOI (all versions, resolves to the latest):** [10.5281/zenodo.14922763](https://doi.org/10.5281/zenodo.14922763)
+
+To cite the exact version you used, take its own DOI from the Zenodo record ("Versions" panel), and give the version number in your methods (`pip show ardu`).
