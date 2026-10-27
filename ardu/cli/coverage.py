@@ -78,7 +78,7 @@ def register(subparsers) -> None:
     parser.add_argument("--fasta", metavar="REFERENCE",
                         help="Reference fasta (indexed) of the bams: writes <prefix>_gc.tsv and "
                              "warns when a locus and the normalisation differ in GC.")
-    parser.add_argument("--gc-warn", type=float, default=5, metavar="POINTS",
+    parser.add_argument("--gc-warn", type=float, default=3, metavar="POINTS",
                         help="GC difference (percentage points) above which a locus is flagged.")
     parser.add_argument("--norm-size", type=int, default=1000,
                         help="Size (bp) of the random normalisation windows.")
