@@ -82,3 +82,21 @@ def test_rerun_gets_new_directory(synthetic, tmp_path):
     second = run_coverage(synthetic, tmp_path)
     assert first != second and second.endswith("_2")
     assert os.path.exists(os.path.join(first, "test_coverage.tsv"))
+
+
+def test_exclude_zero_depth(synthetic, tmp_path):
+    # 4 bases at 20x plus 5 uncovered bases at the contig end (the last read ends at 19,995)
+    regions = tmp_path / "gap.bed"
+    regions.write_text("chr1\t1001\t4000\tnorm\nchr1\t3001\t3004\tgap\nchr1\t19996\t20000\tgap\n")
+    cells = {}
+    for mode, extra in (("zeros", []), ("nozeros", ["--exclude-zero-depth"])):
+        (tmp_path / mode).mkdir()
+        cmd = [sys.executable, "-m", "ardu", "coverage", "-b", str(synthetic["bamlist"]),
+               "-r", str(regions), "-n", "norm", "-o", "test", *extra]
+        subprocess.run(cmd, cwd=tmp_path / mode, check=True, capture_output=True, text=True)
+        cells[mode] = read_rcn(glob.glob(os.path.join(tmp_path, mode, "ArDuRun-test-*"))[0])["gap"]
+    mean, _, median, covered, rcn = cells["zeros"]
+    assert float(median) == 0.0 and float(rcn) == 0.0 and abs(float(mean) - 80 / 9) < 0.01
+    mean, _, median, covered_nz, rcn = cells["nozeros"]
+    assert float(median) == 20.0 and float(rcn) == 1.0 and float(mean) == 20.0
+    assert covered == covered_nz == "4"

@@ -186,6 +186,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | **Read filters** | | |
 | `--min-mapq` | Minimum mapping quality of reads counted in depth and mutation counts. Lower it for loci with identical paralog copies in the reference, whose reads get MAPQ 0. | `20` |
 | `--min-baseq` | Minimum base quality counted in depth and mutation counts. | `13` |
+| `--exclude-zero-depth` | Leave bases with depth 0 out of the mean, median, sd, RCN and its interval. By default they count as 0, so a locus with more than half of its bases uncovered gets a median, and an RCN, of 0. CovBases is the same in both modes. | `False` |
 | **RCN uncertainty** | | |
 | `--rcn-ci` | Add a 95% interval to each RCN from N block bootstrap replicates (two extra fields per cell). | `0` (off) |
 | `--ci-block` | Block size (bp) of the bootstrap; bases are resampled in blocks because neighbouring bases share reads. | `500` |

@@ -107,6 +107,9 @@ def register(subparsers) -> None:
     parser.add_argument("--min-baseq", type=int, default=None,
                         help="Minimum base quality counted in depth and mutation "
                              "counts. Default=13.")
+    parser.add_argument("--exclude-zero-depth", action="store_true",
+                        help="Leave bases with depth 0 out of the mean, median, sd, RCN and "
+                             "its interval (default: they count as 0). CovBases is unchanged.")
 
     # RCN uncertainty
     parser.add_argument("--rcn-ci", type=int, default=0, metavar="N",
@@ -417,7 +420,8 @@ def _process_one_bam(
     print(f"Processing {bam_name}")
 
     depth_arrays = {} if args.rcn_ci > 0 else None
-    locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file, depth_arrays)
+    locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file, depth_arrays,
+                                                 exclude_zero=args.exclude_zero_depth)
 
     if args.norm not in locus_coverage_df["locus"].values:
         print(f"Normalisation locus not found in {bam_file}. Skipping.")
@@ -805,6 +809,8 @@ def run(args) -> None:
             fh.write("# RCN:      relative copy number (median depth of the locus / median depth "
                      "of the normalisation locus, i.e. copies per normalisation-locus copy).\n")
             fh.write(f"# Normalisation: {norm_note}\n")
+            fh.write("# Zero-depth bases: " + ("left out of uDoC, sdDoC, medDoC and RCN.\n"
+                     if args.exclude_zero_depth else "counted as 0 in uDoC, sdDoC, medDoC and RCN.\n"))
             if args.rcn_ci > 0:
                 fh.write(f"# RCN_low, RCN_high: 95% interval of RCN from {args.rcn_ci} block bootstrap "
                          f"replicates ({args.ci_block} bp blocks, seed {args.ci_seed}).\n")
