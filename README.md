@@ -10,12 +10,12 @@ ArDu is now distributed as a proper Python package with four subcommands:
 | `ardu coverage` | Depth-of-coverage analysis, normalisation, copy number estimation, breakpoint detection |
 | `ardu softclips` | Extract soft-clipped sequences around breakpoints, run BLAST |
 | `ardu junctions` | Junction-read detection, bridging pairs, insert-size and softclip plots |
-| `ardu parse` | Extract individual metric columns from a coverage TSV |
+| `ardu parse` | Extract individual metric columns from a coverage tsv |
 
 ## Table of contents
 
 - [Quick start](#quick-start)
-- [Example run](#example-run----anopheles-gambiae-ace-1-duplication)
+- [Example run](#example-run-anopheles-gambiae-ace-1-duplication)
 - [Installation](#installation)
 - [ardu coverage](#ardu-coverage)
 - [ardu softclips](#ardu-softclips)
@@ -32,6 +32,16 @@ ArDu is now distributed as a proper Python package with four subcommands:
 ### Minimal run:
 ```bash
 ardu coverage -b bamlist.txt -r regions.txt -n Reference -o output_prefix
+```
+
+### With a GC check and random normalisation windows on the autosomes:
+```bash
+ardu coverage -b bamlist.txt -r regions.txt -o run1 --fasta genome.fa \
+  --norm-random 1000 --norm-chroms 2L 2R 3L 3R
+
+# later runs reuse the same windows
+ardu coverage -b bamlist2.txt -r regions.txt -o run2 --fasta genome.fa \
+  -n ArDuRun-run1-DATE/run1_norm_windows.bed
 ```
 
 ### With plotting and breakpoint detection:
@@ -51,13 +61,13 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
   -o JunctionTest
 ```
 
-## Example run — *Anopheles gambiae* ace-1 duplication
+## Example run: *Anopheles gambiae* ace-1 duplication
 
 The ace-1 locus is known to be involved in insecticide resistance linked to a gene duplication in *Anopheles gambiae* mosquitoes. Using a wild-caught sample from Yopougon (Ivory Coast) we identified a large tandem duplication spanning ~203 kb overlapping the ace-1 locus and 9 other genes.
 
 The inputs are in `examples/ace1/`: the reads of this sample over AgamP4_2R:3.30-3.80 Mb (the duplication and its flanks) and AgamP4_X:8.040-8.065 Mb (the normalisation region), the region and plot beds, and AgamP4_2R up to 3.8 Mb as reference (original coordinates). Run the commands from that folder. The outputs shown below are in `docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/`.
 
-### Step 1 — Coverage analysis and breakpoint detection
+### Step 1: Coverage analysis and breakpoint detection
 
 ```bash
 cd examples/ace1
@@ -73,7 +83,7 @@ The normalised depth of coverage rises from ~1 to ~2.2 at breakpoint 1 (AgamP4_2
   <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/ace-1-plots/Yop16-60_ace-1_plot.png" width="800">
 </p>
 
-### Step 2 — Junction evidence
+### Step 2: Junction evidence
 
 ```bash
 mkdir -p ArDuRun-ArduExampleRun-DATE/junctions
@@ -128,7 +138,7 @@ ardu --help
 ```
 
 ### Run the tests:
-The tests build small synthetic BAMs with known answers (copy number, low MAPQ reads, junction reads, homopolymer lengths), so no data is needed:
+The tests build small synthetic bams with known answers (copy number, low MAPQ reads, junction reads, homopolymer lengths), so no data is needed:
 ```bash
 pip install -e ".[test]"   # or use the conda environment above
 pytest
@@ -140,7 +150,7 @@ pytest
 
 Depth-of-coverage analysis across target loci, normalisation by a reference region, optional plotting and breakpoint detection.
 
-### Example run — *Anopheles gambiae* ace-1 gene duplication:
+### Example run: *Anopheles gambiae* ace-1 gene duplication
 ```bash
 ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
   --plot png --plot-interval ace1plot.bed --plot-slw 2500 --plot-bin 500 \
@@ -153,8 +163,8 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | Argument | Description | Default |
 |---|---|---|
 | **Mandatory** | | |
-| `-b, --bam` | File listing BAM paths, one per line. All BAMs must be indexed (`samtools index`). | |
-| `-r, --region` | 4-column tab-delimited BED-like file: `chromosome start stop locus_name`. Regions sharing a name are pooled. | |
+| `-b, --bam` | File listing bam paths, one per line. All bams must be indexed (`samtools index`). | |
+| `-r, --region` | 4-column tab-delimited bed-like file: `chromosome start stop locus_name`. Regions sharing a name are pooled. | |
 | `-n, --norm` | Name of the normalisation locus in the region file, or a region file of its own (e.g. the `_norm_windows.bed` of an earlier run). Give either `-n` or `--norm-random`. | |
 | `-o, --outfile` | Prefix for output file names. | |
 | **GC check and random normalisation windows** | | |
@@ -165,7 +175,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--norm-gc` | `match`: keep windows within 2 GC points of the median GC of the loci; `any`: no GC selection. | `match` |
 | `--norm-chroms` | Contigs to draw windows from, e.g. the autosomes. | contigs of at least 1 Mb |
 | `--norm-ignore` | Loci of the region file left out of the GC the windows match, e.g. an old reference locus. They are still reported and kept at `--norm-margin`. | `None` |
-| `--norm-exclude` | BED of regions the windows must avoid (known CNVs, repeats). | `None` |
+| `--norm-exclude` | bed of regions the windows must avoid (known CNVs, repeats). | `None` |
 | `--norm-margin` | Distance (bp) kept between the windows and every locus of the region file. | `50000` |
 | `--norm-seed` | Random seed of the window draw. | `1` |
 | **Read filters** | | |
@@ -176,7 +186,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--ci-block` | Block size (bp) of the bootstrap; bases are resampled in blocks because neighbouring bases share reads. | `500` |
 | `--ci-seed` | Random seed of the bootstrap. | `1` |
 | **Parallelism** | | |
-| `-t, --threads` | Number of parallel BAM processing workers. | `1` |
+| `-t, --threads` | Number of parallel bam processing workers. | `1` |
 | **Plotting** | | |
 | `--plot` | Produce per-sample plots. Accepts: png, jpeg, jpg, pdf, svg, eps. | `None` |
 | `--plot-threshold` | Minimum normalised coverage to trigger plotting. | `1.4` |
@@ -216,13 +226,13 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--bkp-passes` | Smoothing passes for rolling-average method. | `1` |
 | **Genotyping** | | |
 | `--mutation` | Tab-delimited file: `chromosome position [mutation_name]`. Returns per-nucleotide read counts at each position. | `None` |
-| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position (VCF-style anchor) and the length of the homopolymer run that follows it in each read. | `False` |
+| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position (vcf-style anchor) and the length of the homopolymer run that follows it in each read. | `False` |
 
 ---
 
 ## ardu softclips
 
-Extracts soft-clipped sequences from BAM files around each breakpoint, writes them to FASTA, and optionally runs BLAST against a reference genome to identify cross-mapping between breakpoints.
+Extracts soft-clipped sequences from bam files around each breakpoint, writes them to fasta, and optionally runs BLAST against a reference genome to identify cross-mapping between breakpoints.
 
 ```bash
 ardu softclips -b bamlist.txt -i run1_breakpoints.tsv -o run1 \
@@ -233,12 +243,12 @@ ardu softclips -b bamlist.txt -i run1_breakpoints.tsv -o run1 \
 
 | Argument | Description | Default |
 |---|---|---|
-| `-b, --bam_list` | File listing BAM paths, one per line. | |
-| `-i, --input` | Breakpoints TSV from `ardu coverage`. | |
+| `-b, --bam_list` | File listing bam paths, one per line. | |
+| `-i, --input` | Breakpoints tsv from `ardu coverage`. | |
 | `-o, --output` | Output file prefix. | |
 | `-s, --size` | Minimum soft-clip length to extract (bp). | `30` |
 | `-e, --extension` | Region to search around each breakpoint (bp). | `30` |
-| `--blast` | Reference genome FASTA; triggers BLAST run and hit filtering. | `None` |
+| `--blast` | Reference genome fasta; triggers BLAST run and hit filtering. | `None` |
 | `--pairs` | Allowed breakpoint pairs, e.g. `--pairs 1-2 3-4`. | `None` |
 | `--plot` | Plot softclip density per sample per breakpoint. | `False` |
 
@@ -246,10 +256,10 @@ ardu softclips -b bamlist.txt -i run1_breakpoints.tsv -o run1 \
 
 ## ardu junctions
 
-Full junction-evidence pipeline. Uses the breakpoints TSV from `ardu coverage` to:
+Full junction-evidence pipeline. Uses the breakpoints tsv from `ardu coverage` to:
 1. Extract soft-clipped sequences around each breakpoint
 2. Detect bridging read pairs (mates mapping at different breakpoints)
-3. Optionally find spanning reads — single reads whose sequence crosses the junction (using an Aho-Corasick automaton)
+3. Optionally find spanning reads: single reads whose sequence crosses the junction (using an Aho-Corasick automaton)
 4. Optionally run BLAST on all extracted softclips
 5. Summarise and plot the insert size of read pairs, and plot softclip pileups
 
@@ -275,7 +285,7 @@ For each pair, the evidence is gathered in `*_junction_summary.tsv`:
 
 With `--plot-evidence`, a locus with three breakpoints or more also gets an **overview** figure: the reference segments with their depth relative to the flanks, each joined pair as an arc labelled with its SV type and support, and one possible haplotype built from them. Joined deletions and tandem duplications are applied outermost first; an event nested inside a duplicated segment is placed on one of its copies chosen at random (noted on the figure), or, for a deletion whose segment is less covered than the flanks, on both copies. The junction reads alone cannot tell these apart; only the depth can. Junctions that overlap without nesting are shown as arcs but not modelled.
 
-`--report` gathers the same evidence in one PDF per sample and locus, one kind of evidence per page for every joined pair: structure (the overview with three breakpoints or more), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
+`--report` gathers the same evidence in one pdf per sample and locus, one kind of evidence per page for every joined pair: structure (the overview with three breakpoints or more), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
 
 `--plot-evidence` also draws one figure per sample and joined breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction, its sequence and the segment depths; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
@@ -285,7 +295,7 @@ With `--junction` and `--plot-evidence`, and [MAFFT](https://mafft.cbrc.jp/align
 
 Given a reference (`--reference`, or the `--blast` one), the reads are added onto the junction expected from the refined breakpoints (`--addfragments`), which gives the bases inserted at the junction, the identity of the consensus with the expected junction, and the microhomology (bases found on both sides, which leave the exact breakpoint ambiguous within them). Long inserted sequences show only as far as the reads cover them.
 
-The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned FASTA, and drawn in the evidence figure: the reads around the junction, and the consensus sequence coloured by side of the junction, with inserted bases and microhomology highlighted, weakly supported bases faded, and the coordinates of each side.
+The alignment is written as a text view (reads stacked under the consensus, `.` for agreement, `|` at the junction) and as an aligned fasta, and drawn in the evidence figure: the reads around the junction, and the consensus sequence coloured by side of the junction, with inserted bases and microhomology highlighted, weakly supported bases faded, and the coordinates of each side.
 
 All outputs are written to a `junctions/` subdirectory inside the existing `ArDuRun-*` output folder.
 
@@ -300,35 +310,35 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 | Argument | Description | Default |
 |---|---|---|
-| `-b, --bam_list` | File listing BAM paths, one per line. | |
-| `-i, --input` | Breakpoints TSV from `ardu coverage`. | |
+| `-b, --bam_list` | File listing bam paths, one per line. | |
+| `-i, --input` | Breakpoints tsv from `ardu coverage`. | |
 | `-o, --output` | Output prefix (written inside `junctions/` in the ArDuRun directory). | |
 | `-s, --size` | Minimum soft-clip length to extract (bp). | `30` |
 | `-e, --extension` | Region to search around each breakpoint (bp). | `30` |
-| `--blast` | Reference genome FASTA; triggers BLAST and hit filtering. | `None` |
+| `--blast` | Reference genome fasta; triggers BLAST and hit filtering. | `None` |
 | `--pairs` | Restrict analysis to specific breakpoint pairs, e.g. `--pairs 1-2 3-4`. | `None` |
 | `--junction` | Find reads whose sequence physically spans the breakpoint junction. | `False` |
-| `--junction-fastq` | Write spanning reads as FASTQ instead of FASTA. | `False` |
+| `--junction-fastq` | Write spanning reads as fastq instead of fasta. | `False` |
 | `--sv-type` | SV type used for the expected insert of bridging pairs: `auto`, `deletion` or `duplication`. `auto` picks the type the pair orientations support (FR: deletion, RF: tandem duplication), which assumes the SV is longer than the library insert. | `auto` |
 | `--plot-insert` | Plot insert-size distributions. | `False` |
 | `--plot-softclip` | Plot softclip pileup per breakpoint, left and right clips stacked, with predicted and refined positions. | `False` |
 | `--plot-evidence` | Plot softclips at both breakpoints and the bridging pair inserts of each breakpoint pair, with the evidence summary. With `--junction` and MAFFT, also align the junction reads. | `False` |
 | `--min-support` | Split reads plus bridging pairs (junction reads without split reads) needed to join two breakpoints and call an SV. | `2` |
 | `--segment-flank` | Length of the flanks outside the first and last breakpoints that segment depths are compared with (bp). | `10000` |
-| `--reference` | Indexed reference FASTA for the expected junction and microhomology. Defaults to the `--blast` reference. | `None` |
-| `--report` | Write one PDF per sample and locus with one kind of evidence per page (structure, softclips, insert sizes, junction read alignment, junction consensus). | `False` |
+| `--reference` | Indexed reference fasta for the expected junction and microhomology. Defaults to the `--blast` reference. | `None` |
+| `--report` | Write one pdf per sample and locus with one kind of evidence per page (structure, softclips, insert sizes, junction read alignment, junction consensus). | `False` |
 | `--plot-mode` | `per-bam`, `pooled`, or `both`. | `per-bam` |
 
 ### Output files
 
 | File | Description |
 |---|---|
-| `*_bridging_pairs.tsv` | Discordant read pairs with one mate in each of two breakpoint windows of the same locus, each pair listed once. Contains BAM file, locus, read name, positions of both mates, insert size, orientation, proper pair flag and breakpoint bridge. |
+| `*_bridging_pairs.tsv` | Discordant read pairs with one mate in each of two breakpoint windows of the same locus, each pair listed once. Contains bam file, locus, read name, positions of both mates, insert size, orientation, proper pair flag and breakpoint bridge. |
 | `*_junction_summary.tsv` | One row per sample and breakpoint pair: predicted and refined breakpoints (with clip side and source), SV type and size, split reads, junction reads, softclips per breakpoint, bridging pairs with orientation, median and expected insert; with a reference, the microhomology; with the alignment, reads aligned, consensus length, depth and lowest agreement around the junction, inserted bases and identity with the expected junction. |
 | `*_{sample}_{locus}_1-2_junction_alignment.txt` | Junction and split reads stacked under their consensus, with the junction marked. |
 | `*_{sample}_{locus}_1-2_junction_msa.fasta` | The MAFFT alignment, with the consensus (and the expected junction with a reference). |
 | `*_segments.tsv` | Median depth of each segment between consecutive breakpoints and of the flanks, relative to the flanks. |
-| `*_insert_summary.tsv` | Per BAM (and `pooled`): the library insert (median, quartiles and MAD of proper FR pairs), then n, median and quartiles of the bridging pairs per breakpoint pair (with `--pairs`) or of the discordant pairs per breakpoint, by orientation, with the SV type and expected insert. |
+| `*_insert_summary.tsv` | Per bam (and `pooled`): the library insert (median, quartiles and MAD of proper FR pairs), then n, median and quartiles of the bridging pairs per breakpoint pair (with `--pairs`) or of the discordant pairs per breakpoint, by orientation, with the SV type and expected insert. |
 | `*_soft_clipped_sequences.fasta` | All extracted soft-clipped sequences. |
 | `*.tsv` | Per-read softclip details (position, CIGAR, mate position, insert size). |
 | `*_BLAST_results.txt` | Raw BLAST output (if `--blast` used). |
@@ -346,7 +356,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 Extracts individual metric columns from the semicolon-separated `coverage.tsv` columns, into a more user-friendly matrix. At least one field flag must be provided. Missing or malformed entries are converted to `NA`. Output is a wide-format matrix: first column is `locus`, each additional column is tagged with a `sample_field` combination.
 
-Optionally, columns can be filtered by the value at a specific locus row, and the output can be written as a simple header list (e.g. to generate a BAM file list for downstream ArDu runs).
+Optionally, columns can be filtered by the value at a specific locus row, and the output can be written as a simple header list (e.g. to generate a bam file list for downstream ArDu runs).
 
 ### Basic usage
 
@@ -356,7 +366,7 @@ ardu parse -i run1_coverage.tsv -o run1_rcn.tsv --RCN --medDOC
 
 ### Filter columns by value at a specific locus
 
-Keep only samples where RCN > 1.4 at locus `ace1`, output as TSV:
+Keep only samples where RCN > 1.4 at locus `ace1`, output as tsv:
 ```bash
 ardu parse -i run1_coverage.tsv -o run1_rcn_filtered.tsv --RCN \
   --filter "ace1:>:1.4"
@@ -382,8 +392,8 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 | Argument | Description | Default |
 |---|---|---|
 | **Mandatory** | | |
-| `-i, --input` | Input ArDu coverage TSV. | |
-| `-o, --output` | Output file (TSV matrix or header list). | |
+| `-i, --input` | Input ArDu coverage tsv. | |
+| `-o, --output` | Output file (tsv matrix or header list). | |
 | **Metric selection** | | |
 | `--uDOC` | Extract mean depth of coverage. | |
 | `--sdDOC` | Extract standard deviation. | |
@@ -397,7 +407,7 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 | `--filter-op` | Comparison operator: `>`, `<`, `>=`, `<=`, `==`, `!=`. | `None` |
 | `--filter-value` | Numeric threshold for the filter. | `None` |
 | **Output format** | | |
-| `--format` | `tsv` — full filtered matrix (default); `list` — one column header per line. | `tsv` |
+| `--format` | `tsv`: full filtered matrix (default); `list`: one column header per line. | `tsv` |
 | `--suffix` | Suffix appended to each header in `list` mode, e.g. `.bam`. | `""` |
 
 ---
@@ -429,7 +439,7 @@ All outputs from `ardu coverage` are written to a timestamped directory. A secon
 ```
 Error processing BAM file TestRun.bam: no index available for pileup
 ```
-→ No index found. Check for `.bai` files in the .bam directory and make sure their names match the BAM files.
+→ No index found. Check for `.bai` files in the .bam directory and make sure their names match the bam files.
 
 ```
 Error processing BAM file TestRun.bam: invalid literal for int() with base 10: 'st'
@@ -440,7 +450,7 @@ Error processing BAM file TestRun.bam: invalid literal for int() with base 10: '
 
 ## Gene Copy Number Estimates, word of caution and best practises
 
-ArDu uses depth of coverage from BAM alignment files to estimate copy number at target loci, normalised by a user-provided reference. Depending on the reference used, this normalised depth can be directly used as a copy-number proxy (Claret et al. 2023).
+ArDu uses depth of coverage from bam alignment files to estimate copy number at target loci, normalised by a user-provided reference. Depending on the reference used, this normalised depth can be directly used as a copy-number proxy (Claret et al. 2023).
 
 The choice of reference is critical. A wide range of genomic intervals can be used, from whole chromosome to a single gene, but we have seen consistent improvement in precision when using exonic sequences of a few housekeeping genes. Be aware that really large copy number variations (e.g. in the hundreds) will produce noisy epth of coverage profiles and wil lresults in poor CN estimates. 
 
