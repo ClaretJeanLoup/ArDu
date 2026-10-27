@@ -155,8 +155,18 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | **Mandatory** | | |
 | `-b, --bam` | File listing BAM paths, one per line. All BAMs must be indexed (`samtools index`). | |
 | `-r, --region` | 4-column tab-delimited BED-like file: `chromosome start stop locus_name`. Regions sharing a name are pooled. | |
-| `-n, --norm` | Name of the normalisation locus in the region file. | |
+| `-n, --norm` | Name of the normalisation locus in the region file, or a region file of its own (e.g. the `_norm_windows.bed` of an earlier run). Give either `-n` or `--norm-random`. | |
 | `-o, --outfile` | Prefix for output file names. | |
+| **GC check and random normalisation windows** | | |
+| `--fasta` | Reference fasta (indexed) of the bams. Writes `_gc.tsv` with the GC of each locus and of the normalisation, and warns when they differ by more than `--gc-warn` points. | `None` |
+| `--gc-warn` | GC difference (percentage points) above which a locus is flagged. | `5` |
+| `--norm-random` | Normalise on N random windows instead of a locus (needs `--fasta`). The windows are written to `_norm_windows.bed`; pass that file to `-n` to reuse them. | `None` |
+| `--norm-size` | Size (bp) of the random windows. | `1000` |
+| `--norm-gc` | `match`: keep windows within 2 GC points of the median GC of the loci; `any`: no GC selection. | `match` |
+| `--norm-chroms` | Contigs to draw windows from, e.g. the autosomes. | contigs of at least 1 Mb |
+| `--norm-exclude` | BED of regions the windows must avoid (known CNVs, repeats). | `None` |
+| `--norm-margin` | Distance (bp) kept between the windows and every locus of the region file. | `50000` |
+| `--norm-seed` | Random seed of the window draw. | `1` |
 | **Read filters** | | |
 | `--min-mapq` | Minimum mapping quality of reads counted in depth and mutation counts. Lower it for loci with identical paralog copies in the reference, whose reads get MAPQ 0. | `20` |
 | `--min-baseq` | Minimum base quality counted in depth and mutation counts. | `13` |
@@ -400,6 +410,8 @@ All outputs from `ardu coverage` are written to a timestamped directory. A secon
 | File | Description |
 |---|---|
 | `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;RCN`, followed by `;RCN_low;RCN_high` with `--rcn-ci`. RCN is written with 4 decimals. |
+| `*_gc.tsv` | GC of each locus (regions padded by 100 bp) and its difference with the normalisation, in GC points (if `--fasta` used). |
+| `*_norm_windows.bed` | The random normalisation windows (if `--norm-random` used), in the region file format, for reuse with `-n`. |
 | `*_breakpoints.tsv` | Predicted breakpoint positions (if `--breakpoint` used). Numbered in the same order as the plot. |
 | `*_mutations.tsv` | Per-position nucleotide counts (if `--mutation` used). Format: `A=;T=;C=;G=;depth=`, followed by `;ins=;del=;runs=` with `--mutation-indels` (e.g. `runs=T8:12,T9:3,T10:5`). |
 | `{locus}-plots/` | Per-locus plot directory. Contains per-sample and pooled plots. |
@@ -432,6 +444,10 @@ ArDu uses depth of coverage from BAM alignment files to estimate copy number at 
 The choice of reference is critical. A wide range of genomic intervals can be used, from whole chromosome to a single gene, but we have seen consistent improvement in precision when using exonic sequences of a few housekeeping genes. Be aware that really large copy number variations (e.g. in the hundreds) will produce noisy epth of coverage profiles and wil lresults in poor CN estimates. 
 
 RCN is the median depth of the locus divided by the median depth of the normalisation locus, so it counts copies per copy of the normalisation locus. With a single copy gene of a diploid genome as reference, RCN = 1 means two copies per cell; multiply by two for copies per diploid cell. Use `--rcn-ci` to judge whether a value differs from 1.
+
+**GC content.** PCR during library preparation makes depth depend on the GC of the fragments, and the shape of that dependence differs between libraries: some lose depth in GC-rich sequence, others gain. When a locus and its reference differ in GC, RCN carries that bias, and it differs between samples. Exons are GC-rich (in AgamP4, median 53% GC against 45% for the genome), so a GC-rich reference gene can be off for typical targets. Give `--fasta` to get the GC of every locus in `_gc.tsv`, with a warning above `--gc-warn` points. GC is measured on the regions padded by 100 bp, since the fragments covering a base mostly overlap its close neighbours. Small differences can matter in a strongly biased library: in the most biased of 55 *An. gambiae* libraries, ace-1 and its reference differ by 3.6 points, and the RCN was 37% higher than with GC-matched random windows (2.25 against 1.64).
+
+**Random windows as reference.** `--norm-random 1000` replaces the reference locus by 1,000 windows of 1 kb drawn at random, away from the loci (`--norm-margin`) and from `--norm-exclude`, and matched to the median GC of the loci. A window falling in a duplication or deletion barely moves the median over 1,000 windows. Restrict them with `--norm-chroms` to the autosomes: a reference on a sex chromosome halves its depth in the heterogametic sex and doubles every RCN (in *An. gambiae* males, the ace-1 RCN against an X-linked gene came out at 3.5 to 4.8, against 1.4 to 2.3 with autosomal windows). The windows cost about 5 s per bam. To compare runs, reuse the same windows: `-n ArDuRun-run1-<date>/run1_norm_windows.bed`.
 
 Reads in identical paralog copies present in the reference get MAPQ 0 and are dropped by the default `--min-mapq 20`, which flattens the depth of such duplications. Lower `--min-mapq` (e.g. to 0) when the reference contains both copies.
 

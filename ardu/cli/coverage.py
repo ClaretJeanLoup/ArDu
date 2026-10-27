@@ -25,6 +25,15 @@ from ardu.bam import (
     configure_read_filters,
     calculate_nucleotide_counts,
     depth_over_region,
+    parse_region,
+)
+from ardu.gc import (
+    GC_PAD,
+    draw_norm_windows,
+    loci_gc,
+    read_bed_intervals,
+    write_gc_report,
+    write_windows_bed,
 )
 from ardu.intervals import get_regions, get_totalspan, parse_plot_intervals
 from ardu.plotting import make_pooled_plot, render_per_sample_plot
@@ -54,11 +63,37 @@ def register(subparsers) -> None:
                         help="Four-column BED-like file "
                              "(chromosome, start, stop, locus_name).  "
                              "Regions sharing a locus_name are pooled.")
-    parser.add_argument("-n", "--norm", required=True,
-                        help="Name of the normalisation locus in the region file.")
+    norm = parser.add_mutually_exclusive_group(required=True)
+    norm.add_argument("-n", "--norm",
+                      help="Name of the normalisation locus in the region file, or a region file "
+                           "of its own (e.g. the _norm_windows.bed of an earlier run).")
+    norm.add_argument("--norm-random", type=int, metavar="N",
+                      help="Normalise on N random windows instead of a locus (needs --fasta). "
+                           "They are written to <prefix>_norm_windows.bed for reuse with -n.")
     parser.add_argument("-o", "--outfile", required=True,
                         help="Prefix for output file names. The run folder is created in "
                              "the prefix's directory (current directory if none).")
+
+    # GC and random normalisation windows
+    parser.add_argument("--fasta", metavar="REFERENCE",
+                        help="Reference fasta (indexed) of the bams: writes <prefix>_gc.tsv and "
+                             "warns when a locus and the normalisation differ in GC.")
+    parser.add_argument("--gc-warn", type=float, default=5, metavar="POINTS",
+                        help="GC difference (percentage points) above which a locus is flagged.")
+    parser.add_argument("--norm-size", type=int, default=1000,
+                        help="Size (bp) of the random normalisation windows.")
+    parser.add_argument("--norm-gc", choices=["match", "any"], default="match",
+                        help="'match': keep windows within 2 GC points of the median GC of the "
+                             "loci; 'any': no GC selection.")
+    parser.add_argument("--norm-exclude", metavar="BED",
+                        help="BED of regions the windows must avoid (known CNVs, repeats).")
+    parser.add_argument("--norm-chroms", nargs="+", metavar="CONTIG",
+                        help="Contigs to draw windows from (e.g. the autosomes); "
+                             "default: every contig of at least 1 Mb.")
+    parser.add_argument("--norm-margin", type=int, default=50_000,
+                        help="Distance (bp) kept between the windows and the loci of the region file.")
+    parser.add_argument("--norm-seed", type=int, default=1,
+                        help="Random seed of the window draw.")
 
     # Read filters
     parser.add_argument("--min-mapq", type=int, default=None,
@@ -546,6 +581,86 @@ def _format_row(row) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Normalisation locus and GC check
+# ---------------------------------------------------------------------------
+
+NORM_RANDOM = "norm_random"
+
+
+def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> str:
+    """Add the normalisation regions to *regions_dict*, point ``args.norm`` at them, check GC.
+
+    Returns a one-line description of the normalisation for the coverage header.
+    """
+    if args.norm_random is not None:
+        if not args.fasta:
+            sys.exit("--norm-random needs --fasta to draw the windows.")
+        if NORM_RANDOM in regions_dict:
+            sys.exit(f"The region file already has a locus named {NORM_RANDOM}.")
+        target_gc = None
+        if args.norm_gc == "match":
+            gcs = [g for g, _ in loci_gc(args.fasta, regions_dict).values() if not np.isnan(g)]
+            if not gcs:
+                sys.exit("No locus of the region file is in the fasta, so no GC to match.")
+            target_gc = float(np.median(gcs))
+        exclude = [
+            (chrom, s - args.norm_margin, e + args.norm_margin)
+            for region_list in regions_dict.values()
+            for chrom, s, e in (parse_region(r) for r in region_list if r)
+        ]
+        if args.norm_exclude:
+            exclude += read_bed_intervals(args.norm_exclude)
+        windows = draw_norm_windows(
+            args.fasta, args.norm_random, args.norm_size, exclude,
+            target_gc=target_gc, chroms=args.norm_chroms, seed=args.norm_seed,
+        )
+        if not windows:
+            sys.exit("No normalisation window could be drawn.")
+        if len(windows) < args.norm_random:
+            print(f"Warning: only {len(windows)} of {args.norm_random} normalisation windows "
+                  "matched; the genome has few windows of this GC.")
+        bed = os.path.join(output_dir, f"{out_name}_norm_windows.bed")
+        write_windows_bed(bed, windows, NORM_RANDOM)
+        print(f"Normalisation windows saved to {bed}")
+        regions_dict[NORM_RANDOM] = [f"{c}:{s + 1}-{e}" for c, s, e in windows]
+        args.norm = NORM_RANDOM
+        gc_note = f", GC {target_gc:.3f} +/- 0.02 (median of the loci)" if target_gc is not None else ""
+        note = (f"{len(windows)} random windows of {args.norm_size} bp{gc_note}, "
+                f"seed {args.norm_seed}, in {os.path.basename(bed)}")
+    elif os.path.isfile(args.norm):
+        norm_regions = get_regions(args.norm)
+        if not norm_regions:
+            sys.exit(f"No region in the normalisation file {args.norm}.")
+        name = next(iter(norm_regions))
+        if name in regions_dict:
+            sys.exit(f"The normalisation file and the region file share the locus name {name}.")
+        regions_dict[name] = [r for region_list in norm_regions.values() for r in region_list]
+        note = f"{len(regions_dict[name])} regions from {args.norm}, pooled as {name}"
+        args.norm = name
+    elif args.norm in regions_dict:
+        note = f"locus {args.norm} of {args.region}"
+    else:
+        raise ValueError(
+            f"Normalisation region '{args.norm}' not found in the regions file."
+        )
+
+    if args.fasta:
+        gc_by_locus = loci_gc(args.fasta, regions_dict)
+        if np.isnan(gc_by_locus[args.norm][0]):
+            print("Warning: the normalisation regions are not in the fasta; GC check skipped.")
+            return note
+        gc_out = os.path.join(output_dir, f"{out_name}_gc.tsv")
+        flagged = write_gc_report(gc_out, gc_by_locus, args.norm, args.gc_warn)
+        print(f"GC report saved to {gc_out}")
+        for name in flagged:
+            print(f"Warning: GC of {name} differs from {args.norm} by more than "
+                  f"{args.gc_warn:g} points (regions +/- {GC_PAD} bp); its RCN may carry a GC bias.")
+    else:
+        print("No --fasta given: GC of the loci not checked.")
+    return note
+
+
+# ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
 
@@ -575,10 +690,7 @@ def run(args) -> None:
         bam_files = fh.read().splitlines()
 
     regions_dict = get_regions(args.region)
-    if args.norm not in regions_dict:
-        raise ValueError(
-            f"Normalisation region '{args.norm}' not found in the regions file."
-        )
+    norm_note = _set_normalisation(args, regions_dict, output_dir, out_name)
 
     plot_intervals_cache = None
     if getattr(args, "plot_interval", None):
@@ -683,6 +795,7 @@ def run(args) -> None:
             fh.write("# CovBases: total number of covered bases on locus span.\n")
             fh.write("# RCN:      relative copy number (median depth of the locus / median depth "
                      "of the normalisation locus, i.e. copies per normalisation-locus copy).\n")
+            fh.write(f"# Normalisation: {norm_note}\n")
             if args.rcn_ci > 0:
                 fh.write(f"# RCN_low, RCN_high: 95% interval of RCN from {args.rcn_ci} block bootstrap "
                          f"replicates ({args.ci_block} bp blocks, seed {args.ci_seed}).\n")
