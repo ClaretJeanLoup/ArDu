@@ -61,8 +61,9 @@ def register(subparsers) -> None:
                         help="File listing BAM paths, one per line.")
     parser.add_argument("-r", "--region", required=True,
                         help="Four-column BED-like file "
-                             "(chromosome, start, stop, locus_name).  "
-                             "Regions sharing a locus_name are pooled.")
+                             "(chromosome, start, stop, locus_name), 1-based and inclusive "
+                             "as in gff. Regions sharing a locus_name are pooled. "
+                             "ardu regions builds it from gene names or sequences.")
     norm = parser.add_mutually_exclusive_group(required=True)
     norm.add_argument("-n", "--norm",
                       help="Name of the normalisation locus in the region file, or a region file "

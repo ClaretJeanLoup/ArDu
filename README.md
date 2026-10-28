@@ -17,6 +17,7 @@ ArDu is now distributed as a proper Python package with four subcommands:
 - [Quick start](#quick-start)
 - [Example run](#example-run-anopheles-gambiae-ace-1-duplication)
 - [Installation](#installation)
+- [ardu regions](#ardu-regions)
 - [ardu coverage](#ardu-coverage)
 - [ardu softclips](#ardu-softclips)
 - [ardu junctions](#ardu-junctions)
@@ -151,6 +152,62 @@ pytest
 
 ---
 
+## ardu regions
+
+Builds the `-r` region file of `ardu coverage`, either from gene names and a gff3 or gtf annotation, or from sequences blasted against the reference. Coordinates are 1-based and inclusive, as in gff and blast.
+
+### From gene names and an annotation
+```bash
+ardu regions -g genes.gff3.gz -l loci.txt -o run1 --feature exon \
+  --chrom-map chroms.txt --fasta genome.fa --plot-margin 100000
+```
+`loci.txt` has one gene or transcript per line, optionally followed by the locus name to use. Lines sharing a locus name are pooled, and a line can also be a region:
+```
+AGAP001356   ace-1
+AGAP000002
+AgamP4_2R:3400000-3410000   flank
+```
+A name is searched, ignoring case, in the `ID`, `Name`, `Alias`, `gene`, `gene_name`, `gene_id`, `locus_tag`, `locus`, `sequence_name`, `transcript_id` and `transcript_name` attributes, and in `Dbxref` with or without its database prefix (`VectorBase:AGAP001356`). Exons or CDS are merged across isoforms; give a transcript ID to keep one isoform. A name that is not found, or that matches several genes, stops the run with the matching features listed, so nothing is left out silently.
+
+### From sequences, by blast
+```bash
+ardu regions -q loci.fa --reference genome.fa -o run1
+```
+Each sequence of `loci.fa` (cDNA, CDS or genomic) is a locus, named by the first word of its header. Its hits are chained into the best collinear set (same chromosome and strand, in query order, at most `--max-intron` bp apart), so a cDNA query gives one interval per exon. Use `--task dc-megablast` for sequences from another species. The run warns, and flags the locus `second_copy` in `<prefix>_hits.tsv`, when the reference holds another copy of the locus or of part of it scoring at least `--second-ratio` of the chosen hits: copies close together can otherwise be mixed in one chain, so check these loci. Hit edges can extend a few bases past exon boundaries, and exons shorter than the blast word size (28 bp with megablast, 11 with blastn) can be missed.
+
+### Arguments
+
+| Argument | Description | Default |
+|---|---|---|
+| `-g, --gff` | gff3 or gtf annotation, may be gzipped. Needs `-l`. Give either `-g` or `-q`. | |
+| `-l, --loci` | With `-g`: genes, transcripts or regions, one per line, optionally followed by a locus name. | |
+| `-q, --query` | Multifasta of locus sequences, one per locus. Needs `--reference`. | |
+| `--reference` | With `-q`: reference fasta of the bams. A blast database is built next to it if missing. | |
+| `-o, --outfile` | Prefix of the output files. | |
+| `--feature` | `exon`, `CDS` or `gene` (whole span). With `-q`, `exon` and `CDS` keep the hits and `gene` their span. | `exon` |
+| `--pad` | Bases added on each side of every interval. | `0` |
+| `--chrom-map` | Two columns: chromosome name in the annotation, name in the bams (e.g. `NT_078266.2 AgamP4_2R` for the RefSeq AgamP4 gff). | `None` |
+| `--fasta` | Reference fasta of the bams: checks the chromosome names and clips padded intervals to the chromosome ends. With `-q` the `--reference` is used. | `None` |
+| `--plot-margin` | Also write `<prefix>_plot.bed` for `--plot-interval`, each locus span extended by this many bases on each side. | `None` |
+| `--task` | blastn task: `megablast`, `dc-megablast` or `blastn`. | `megablast` |
+| `--evalue`, `--threads` | blastn e-value and threads. | `1e-10`, `1` |
+| `--max-intron` | Largest gap (bp) on the reference between two hits of one chain. | `50000` |
+| `--min-intron` | Hits are cut where the reference has a run of at least this many bases missing from the query, an intron bridged by a gapped hit (frequent with `--task blastn` on C. elegans, whose introns are often 45 to 50 bp). | `20` |
+| `--hit-overlap` | Overlap (bp) allowed between consecutive hits. | `30` |
+| `--min-cover` | Warn when the chosen hits cover less of the query than this. | `0.8` |
+| `--second-ratio` | Warn when another copy scores at least this fraction of the chosen hits. | `0.9` |
+
+### Output files
+
+| File | Content |
+|---|---|
+| `<prefix>_regions.bed` | The region file for `-r`. |
+| `<prefix>_plot.bed` | Plot intervals for `--plot-interval` (if `--plot-margin` used). |
+| `<prefix>_blast.tsv` | Raw blast hits (`-q`), tabular with columns `qseqid sseqid pident length qstart qend sstart send evalue bitscore qlen btop`. |
+| `<prefix>_hits.tsv` | Chosen hits per locus (`-q`): position, strand, number of hits, query cover, identity, chain score, best second chain outside the locus and its score ratio, number of hits with another placement, flags (`low_cover`, `second_copy`). |
+
+---
+
 ## ardu coverage
 
 Depth-of-coverage analysis across target loci, normalisation by a reference region, optional plotting and breakpoint detection.
@@ -169,7 +226,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 |---|---|---|
 | **Mandatory** | | |
 | `-b, --bam` | File listing bam paths, one per line. All bams must be indexed (`samtools index`). | |
-| `-r, --region` | 4-column tab-delimited bed-like file: `chromosome start stop locus_name`. Regions sharing a name are pooled. | |
+| `-r, --region` | 4-column tab-delimited bed-like file: `chromosome start stop locus_name`, 1-based and inclusive as in gff (a 0-based bed from bedtools needs 1 added to its starts). Regions sharing a name are pooled. [`ardu regions`](#ardu-regions) builds it from gene names or sequences. | |
 | `-n, --norm` | Name of the normalisation locus in the region file, or a region file of its own (e.g. the `_norm_windows.bed` of an earlier run). Give either `-n` or `--norm-random`. | |
 | `-o, --outfile` | Prefix for output file names. | |
 | **GC check and random normalisation windows** | | |
