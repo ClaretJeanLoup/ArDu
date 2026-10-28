@@ -303,6 +303,7 @@ def calculate_coverage_stats(
     regions: dict[str, list[str]],
     bam_file: str,
     arrays: dict[str, np.ndarray] | None = None,
+    exclude_zero: bool = False,
 ) -> pd.DataFrame:
     """Compute mean, median, and sd of depth of coverage for each named locus.
 
@@ -316,6 +317,9 @@ def calculate_coverage_stats(
     arrays:
         Optional dict filled with the per-base depth array of each locus
         (used for the RCN bootstrap).
+    exclude_zero:
+        Leave bases with depth 0 out of the mean, median, sd and *arrays*.
+        ``coveredbases`` is the number of bases with depth > 0 either way.
 
     Returns
     -------
@@ -341,20 +345,17 @@ def calculate_coverage_stats(
                 coverage_values = (
                     np.concatenate(per_region) if per_region else np.zeros(0)
                 )
+                values = coverage_values[coverage_values > 0] if exclude_zero else coverage_values
                 if arrays is not None:
-                    arrays[name] = coverage_values
+                    arrays[name] = values
 
-                if coverage_values.size:
-                    mean_cov = np.mean(coverage_values)
-                    median_cov = np.median(coverage_values)
-                    sd_cov = (
-                        np.std(coverage_values, ddof=1)
-                        if coverage_values.size > 1
-                        else 0.0
-                    )
-                    covbases = int(np.count_nonzero(coverage_values))
+                if values.size:
+                    mean_cov = np.mean(values)
+                    median_cov = np.median(values)
+                    sd_cov = np.std(values, ddof=1) if values.size > 1 else 0.0
                 else:
-                    mean_cov = median_cov = sd_cov = covbases = "NA"
+                    mean_cov = median_cov = sd_cov = "NA"
+                covbases = int(np.count_nonzero(coverage_values)) if coverage_values.size else "NA"
 
                 data_list.append(
                     {
