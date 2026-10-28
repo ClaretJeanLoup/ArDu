@@ -7,11 +7,12 @@ Usage
     ardu softclips -b bams.txt -i run1_breakpoints.tsv -o run1 [...]
     ardu junctions -b bams.txt -i run1_breakpoints.tsv -o run1 [...]
     ardu parse     -i run1_coverage.tsv -o run1_rcn.tsv --RCN
+    ardu regions   -g genes.gff3 -l genes.txt -o run1 [...]
 """
 
 import argparse
 
-from ardu.cli import coverage, softclips, junctions, parser
+from ardu.cli import coverage, softclips, junctions, parser, regions
 
 
 def main() -> None:
@@ -25,6 +26,7 @@ def main() -> None:
     softclips.register(sub)
     junctions.register(sub)
     parser.register(sub)
+    regions.register(sub)
 
     args = ap.parse_args()
     args.func(args)
