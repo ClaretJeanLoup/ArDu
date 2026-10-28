@@ -232,7 +232,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--bkp-passes` | Smoothing passes for rolling-average method. | `1` |
 | **Genotyping** | | |
 | `--mutation` | Tab-delimited file: `chromosome position [mutation_name]`. Returns per-nucleotide read counts at each position. | `None` |
-| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position (vcf-style anchor) and the length of the homopolymer run that follows it in each read. | `False` |
+| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position and the length of the homopolymer run that follows it in each read. | `False` |
 
 ---
 
