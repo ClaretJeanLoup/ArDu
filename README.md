@@ -3,11 +3,13 @@
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should be modular and easy enough to modify to accommodate the user's specific needs.
 
-ArDu is now distributed as a proper Python package with four subcommands:
+ArDu is now distributed as a proper Python package with six subcommands:
 
 | Subcommand | Description |
 |---|---|
+| `ardu regions` | Build the region file from gene names and a gff/gtf, or by blast |
 | `ardu coverage` | Depth-of-coverage analysis, normalisation, copy number estimation, breakpoint detection |
+| `ardu genotype` | Amino acids at known codons, and their copies in duplicated loci |
 | `ardu softclips` | Extract soft-clipped sequences around breakpoints, run BLAST |
 | `ardu junctions` | Junction-read detection, bridging pairs, insert-size and softclip plots |
 | `ardu parse` | Extract individual metric columns from a coverage tsv |
@@ -19,6 +21,7 @@ ArDu is now distributed as a proper Python package with four subcommands:
 - [Installation](#installation)
 - [ardu regions](#ardu-regions)
 - [ardu coverage](#ardu-coverage)
+- [ardu genotype](#ardu-genotype)
 - [ardu softclips](#ardu-softclips)
 - [ardu junctions](#ardu-junctions)
 - [ardu parse](#ardu-parse)
@@ -136,7 +139,7 @@ This installs all dependencies automatically and registers the `ardu` command.
 
 ### Dependencies
 All dependencies are resolved automatically by pip:
-`pysam`, `numpy`, `pandas`, `matplotlib`, `seaborn`, `ruptures`, `tqdm`, `pyahocorasick`, `scikit-learn`
+`pysam`, `numpy`, `pandas`, `matplotlib`, `seaborn`, `ruptures`, `tqdm`, `pyahocorasick`, `scikit-learn`, `biopython`
 
 ### Verify installation:
 ```bash
@@ -290,6 +293,52 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | **Genotyping** | | |
 | `--mutation` | Tab-delimited file: `chromosome position [mutation_name]`. Returns per-nucleotide read counts at each position. | `None` |
 | `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position and the length of the homopolymer run that follows it in each read. | `False` |
+
+---
+
+## ardu genotype
+
+Reads the codon of known mutations in each read (or read pair), translates it, and with the coverage output of `ardu coverage` shares the copies of the locus between the susceptible (S, reference), resistant (R, named in the mutation) and other (O) amino acids, e.g. `2S2R` for a duplicated heterozygote. The three bases come from the same molecule, which the per-position counts of `ardu coverage --mutation` cannot tell.
+
+```bash
+ardu genotype -b bams.txt -m mutations.tsv -f reference.fa -o run1 \
+    -c ArDuRun-run1-2026-10-29/run1_coverage.tsv
+```
+
+The mutation file has six tab-separated columns: chromosome, start, stop (1-based, inclusive, the three bases of the codon), gene, mutation name and strand of the gene (`forward`/`reverse` or `+`/`-`). The gene must match a locus of the coverage file. Mutation names are of the form `G119S`, or `L1014S/F` for several resistant amino acids; the run stops when the reference codon does not translate to the first amino acid of the name.
+
+```
+AgamP4_2R	3492074	3492076	ace-1	G119S	forward
+```
+
+How the copies are shared:
+- The locus has RCN x 2 copies (RCN x 1 with `--haploid all`). It counts as duplicated above `--dup-rcn` copies per expected copy; below that, it keeps its ploidy, so an RCN of 1.3 gives 2 copies, not 3. Without `-c`, every locus is taken as not duplicated.
+- An amino acid gets copies when it has at least `--min-reads` reads and at least half a copy's share of them, 0.5 / copies (or `--min-frac` if higher). This keeps a single resistant copy in a highly amplified sample (12.5% of the reads at 4 copies) while leaving out sequencing errors.
+- The copies are shared in proportion to the reads by largest remainder, so they always add up to the total.
+
+Where mates overlap, htslib gives each base to one mate only, so a pair is counted once.
+
+### Arguments
+
+| Argument | Description | Default |
+|---|---|---|
+| `-b` / `--bam` | File listing bam paths, one per line. | required |
+| `-m` / `--mutation` | Mutation file (see above). | required |
+| `-f` / `--fasta` | Reference fasta (indexed) of the bams. | required |
+| `-o` / `--outfile` | Prefix of the output file `<prefix>_codons.tsv`. | required |
+| `-c` / `--coverage` | Coverage output of `ardu coverage`, for the RCN of each gene. | `None` |
+| `--translation-table` | NCBI translation table. | `1` |
+| `--min-mapq` | Minimum mapping quality of the reads. | `40` |
+| `--min-baseq` | Minimum base quality of each base of the codon. | `20` |
+| `--min-depth` | Minimum codons read; below it the genotype is NA. | `10` |
+| `--min-reads` | Minimum reads for an amino acid to get a copy. | `3` |
+| `--min-frac` | Minimum share of the reads for an amino acid to get a copy (half a copy applies when higher). | `0.05` |
+| `--dup-rcn` | Copies per expected copy above which a locus counts as duplicated. | `1.4` |
+| `--haploid` | Chromosomes with one copy (e.g. X in males), or `all`. The normalisation locus is taken as diploid unless `all`. | none |
+
+### Output
+
+`<prefix>_codons.tsv` has one row per mutation and one column per sample, like the coverage output. Format: `Genotype;ReadsS;ReadsR;ReadsO;Depth;RCN;Codons;Flags`, e.g. `2S2R;26;26;0;52;2.2;AGC:26:S,GGC:26:G;.` for Yop16-60 at ace-1 G119S. `Codons` lists `codon:reads:amino acid` on the coding strand. Flags: `low_depth`, `rcn_NA`, `R_below_threshold` (resistant reads present but under the threshold), `unplaced_<aa>` (kept, but no copy left for it) and `indel_reads_<n>` (reads with an indel in the codon, left out).
 
 ---
 

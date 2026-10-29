@@ -15,6 +15,7 @@ dependencies:
   - tqdm>=4.66
   - pyahocorasick>=2.0
   - scikit-learn>=1.4
+  - biopython>=1.80
   - blast            # only for ardu softclips / junctions --blast and ardu regions -q
   - mafft            # only for ardu junctions --junction --plot-evidence (junction read alignment)
   - pytest           # only to run the tests
