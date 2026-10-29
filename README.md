@@ -3,11 +3,13 @@
 
 ArDu is a tool designed to screen target loci for genomic duplications, provide estimates of their copy number, and identify their genetic architecture (i.e. breakpoints, copy numbers, secondary rearrangements). As it is entirely written in Python, it should be modular and easy enough to modify to accommodate the user's specific needs.
 
-ArDu is now distributed as a proper Python package with four subcommands:
+ArDu is now a proper Python package with six subcommands:
 
 | Subcommand | Description |
 |---|---|
+| `ardu regions` | Build the region file from gene names and a gff/gtf, or by blast |
 | `ardu coverage` | Depth-of-coverage analysis, normalisation, copy number estimation, breakpoint detection |
+| `ardu genotype` | Amino acids at known codons, and their copies in duplicated loci |
 | `ardu softclips` | Extract soft-clipped sequences around breakpoints, run BLAST |
 | `ardu junctions` | Junction-read detection, bridging pairs, insert-size and softclip plots |
 | `ardu parse` | Extract individual metric columns from a coverage tsv |
@@ -19,6 +21,7 @@ ArDu is now distributed as a proper Python package with four subcommands:
 - [Installation](#installation)
 - [ardu regions](#ardu-regions)
 - [ardu coverage](#ardu-coverage)
+- [ardu genotype](#ardu-genotype)
 - [ardu softclips](#ardu-softclips)
 - [ardu junctions](#ardu-junctions)
 - [ardu parse](#ardu-parse)
@@ -64,7 +67,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 
 ## Example run: *Anopheles gambiae* ace-1 duplication
 
-The ace-1 locus is known to be involved in insecticide resistance linked to a gene duplication in *Anopheles gambiae* mosquitoes. Using a wild-caught sample from Yopougon (Ivory Coast) we identified a large tandem duplication spanning ~203 kb overlapping the ace-1 locus and 9 other genes.
+The ace-1 locus is known to be involved in insecticide resistance due to a gene duplication in *Anopheles gambiae* mosquitoes. Using a wild-caught sample from Yopougon (Ivory Coast) we identified the same large tandem duplication spanning ~203 kb overlapping the ace-1 locus and 9 other genes.
 
 The inputs are in `examples/ace1/`: the reads of this sample over AgamP4_2R:3.30-3.80 Mb (the duplication and its flanks) and AgamP4_X:8.040-8.065 Mb (the normalisation region), the region and plot beds, and AgamP4_2R up to 3.8 Mb as reference (original coordinates). Run the commands from that folder. The outputs shown below are in `docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/`.
 
@@ -94,9 +97,9 @@ ardu junctions -b bamlist.txt -i ArDuRun-ArduExampleRun-DATE \
   -o ArDuRun-ArduExampleRun-DATE/junctions/JunctionTest
 ```
 
-Fifteen split reads join the two breakpoints at the same junction, which refines them to AgamP4_2R:3,436,927 (left clips, first base of the duplicated segment, 322 bp upstream of the coverage prediction) and 3,639,835 (right clips, last base, 317 bp upstream). Both match the breakpoints confirmed by Assogba et al. (2016) to within 1 bp. The clip sides make it a tandem duplication of 202,909 bp. Seven read pairs bridge the junction, all in RF orientation as expected for a tandem duplication, and 13 reads contain the softclips of both breakpoints.
+Fifteen split reads join the two breakpoints at the same junction, which refines them to AgamP4_2R:3,436,927 (left clips, first base of the duplicated segment, 322 bp upstream of the coverage prediction) and 3,639,835 (right clips, last base, 317 bp upstream). Both match the breakpoints confirmed by Assogba et al. (2016) within 1 bp. The clip sides make it a tandem duplication of 202,909 bp. Seven read pairs bridge the junction, all in RF orientation, and 13 reads contain the softclips sequences of both breakpoints.
 
-Aligned with MAFFT, the 15 reads crossing the junction reconstruct 213 bp of it: the end of the copy is joined to its start through a single inserted G, next to 1 bp of microhomology (C), and the consensus matches the reference at 97.2% (a few SNPs of this wild sample against the PEST reference). The full evidence is in `JunctionTest_junction_summary.tsv` and drawn in one figure:
+Aligned with MAFFT, the 15 reads crossing the junction reconstruct a 213 bp sequence: the end of the copy is joined to its start through a single inserted G, next to 1 bp of microhomology (C). The full evidence is in `JunctionTest_junction_summary.tsv` and shown below:
 
 <p align="center">
   <img src="docs/ExampleRun/ArDuRun-ArduExampleRun-2026-10-15/junctions/JunctionTest_Yop16-60_ace-1_1-2_evidence.png" width="900">
@@ -136,7 +139,7 @@ This installs all dependencies automatically and registers the `ardu` command.
 
 ### Dependencies
 All dependencies are resolved automatically by pip:
-`pysam`, `numpy`, `pandas`, `matplotlib`, `seaborn`, `ruptures`, `tqdm`, `pyahocorasick`, `scikit-learn`
+`pysam`, `numpy`, `pandas`, `matplotlib`, `seaborn`, `ruptures`, `tqdm`, `pyahocorasick`, `scikit-learn`, `biopython`
 
 ### Verify installation:
 ```bash
@@ -144,7 +147,7 @@ ardu --help
 ```
 
 ### Run the tests:
-The tests build small synthetic bams with known answers (copy number, low MAPQ reads, junction reads, homopolymer lengths), so no data is needed:
+The tests build small synthetic bams with known duplications and specifications (copy number, low MAPQ reads, junction reads, homopolymer lengths), so no data is needed:
 ```bash
 pip install -e ".[test]"   # or use the conda environment above
 pytest
@@ -154,48 +157,48 @@ pytest
 
 ## ardu regions
 
-Builds the `-r` region file of `ardu coverage`, either from gene names and a gff3 or gtf annotation, or from sequences blasted against the reference. Coordinates are 1-based and inclusive, as in gff and blast.
+Builds the `-r` region file of `ardu coverage`, either from gene names and a gff3 or gtf annotation, or from sequences blasted against the reference. Coordinates are 1 based, as in gff and blast.
 
 ### From gene names and an annotation
 ```bash
 ardu regions -g genes.gff3.gz -l loci.txt -o run1 --feature exon \
   --chrom-map chroms.txt --fasta genome.fa --plot-margin 100000
 ```
-`loci.txt` has one gene or transcript per line, optionally followed by the locus name to use. Lines sharing a locus name are pooled, and a line can also be a region:
+`loci.txt` has one gene or transcript per line, optionally followed by the locus name to use in -r file. Lines sharing a locus name are pooled, and a line can also be a region:
 ```
 AGAP001356   ace-1
 AGAP000002
 AgamP4_2R:3400000-3410000   flank
 ```
-A name is searched, ignoring case, in the `ID`, `Name`, `Alias`, `gene`, `gene_name`, `gene_id`, `locus_tag`, `locus`, `sequence_name`, `transcript_id` and `transcript_name` attributes, and in `Dbxref` with or without its database prefix (`VectorBase:AGAP001356`). Exons or CDS are merged across isoforms; give a transcript ID to keep one isoform. A name that is not found, or that matches several genes, stops the run with the matching features listed, so nothing is left out silently.
+A name is searched, ignoring case, in the `ID`, `Name`, `Alias`, `gene`, `gene_name`, `gene_id`, `locus_tag`, `locus`, `sequence_name`, `transcript_id` and `transcript_name` fields, and in `Dbxref` with or without its database prefix (i.e. `VectorBase:AGAP001356`). Exons or CDS are merged across isoforms, so the user should give a transcript ID to keep one isoform. A name that is not found or that matches several genes stops the run.
 
 ### From sequences, by blast
 ```bash
 ardu regions -q loci.fa --reference genome.fa -o run1
 ```
-Each sequence of `loci.fa` (cDNA, CDS or genomic) is a locus, named by the first word of its header. Its hits are chained into the best collinear set (same chromosome and strand, in query order, at most `--max-intron` bp apart), so a cDNA query gives one interval per exon. Use `--task dc-megablast` for sequences from another species. The run warns, and flags the locus `second_copy` in `<prefix>_hits.tsv`, when the reference holds another copy of the locus or of part of it scoring at least `--second-ratio` of the chosen hits: copies close together can otherwise be mixed in one chain, so check these loci. Hit edges can extend a few bases past exon boundaries, and exons shorter than the blast word size (28 bp with megablast, 11 with blastn) can be missed.
+Each sequence of `loci.fa` (cDNA, CDS or genomic) is a locus, named by the first word of its header. Its hits are called into the best collinear set (same chromosome and strand, in query order, at most `--max-intron` bp apart), so a cDNA query gives one interval per exon. Use `--task dc-megablast` for sequences from another species. The run warns, and flags the locus `second_copy` in `<prefix>_hits.tsv`, when the reference holds another copy of the locus or of part of it with at least `--second-ratio` of the chosen hits: copies close together can otherwise be mixed in one, so check these loci. Hit edges can extend a few bases past exon boundaries, and exons shorter than the blast word size (28 bp with megablast, 11 with blastn) can be missed.
 
 ### Arguments
 
 | Argument | Description | Default |
 |---|---|---|
-| `-g, --gff` | gff3 or gtf annotation, may be gzipped. Needs `-l`. Give either `-g` or `-q`. | |
-| `-l, --loci` | With `-g`: genes, transcripts or regions, one per line, optionally followed by a locus name. | |
-| `-q, --query` | Multifasta of locus sequences, one per locus. Needs `--reference`. | |
-| `--reference` | With `-q`: reference fasta of the bams. A blast database is built next to it if missing. | |
+| `-g, --gff` | gff3 or gtf annotation, can be gzipped. Needs `-l`. Give either `-g` or `-q`. | |
+| `-l, --loci` | With `-g`: genes, transcripts or regions, one per line, optionally followed by a locus name in which case it will be reported to the output file. | |
+| `-q, --query` | Multifasta of target locus sequences, one per locus. Needs `--reference`. | |
+| `--reference` | With `-q`: reference fasta of the bams. | |
 | `-o, --outfile` | Prefix of the output files. | |
 | `--feature` | `exon`, `CDS` or `gene` (whole span). With `-q`, `exon` and `CDS` keep the hits and `gene` their span. | `exon` |
 | `--pad` | Bases added on each side of every interval. | `0` |
 | `--chrom-map` | Two columns: chromosome name in the annotation, name in the bams (e.g. `NT_078266.2 AgamP4_2R` for the RefSeq AgamP4 gff). | `None` |
 | `--fasta` | Reference fasta of the bams: checks the chromosome names and clips padded intervals to the chromosome ends. With `-q` the `--reference` is used. | `None` |
-| `--plot-margin` | Also write `<prefix>_plot.bed` for `--plot-interval`, each locus span extended by this many bases on each side. | `None` |
+| `--plot-margin` | Also write `<prefix>_plot.bed` for coverage's `--plot-interval`, each locus span extended by this many bases on each side. | `None` |
 | `--task` | blastn task: `megablast`, `dc-megablast` or `blastn`. | `megablast` |
 | `--evalue`, `--threads` | blastn e-value and threads. | `1e-10`, `1` |
-| `--max-intron` | Largest gap (bp) on the reference between two hits of one chain. | `50000` |
-| `--min-intron` | Hits are cut where the reference has a run of at least this many bases missing from the query, an intron bridged by a gapped hit (frequent with `--task blastn` on C. elegans, whose introns are often 45 to 50 bp). | `20` |
+| `--max-intron` | Largest gap (bp) on the reference between two hits of one series. | `50000` |
+| `--min-intron` | Hits are cut where the reference has a run of at least this many bases missing from the query, an intron bridged by a gapped hit (frequent with `--task blastn` on species with smaller introns like C.elegans). | `20` |
 | `--hit-overlap` | Overlap (bp) allowed between consecutive hits. | `30` |
 | `--min-cover` | Warn when the chosen hits cover less of the query than this. | `0.8` |
-| `--second-ratio` | Warn when another copy scores at least this fraction of the chosen hits. | `0.9` |
+| `--second-ratio` | Warn when another copy scores at least this fraction of the chosen hits, i.e. multiple copies or homeologues.| `0.9` |
 
 ### Output files
 
@@ -231,7 +234,7 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `-o, --outfile` | Prefix for output file names. | |
 | **GC check and random normalisation windows** | | |
 | `--fasta` | Reference fasta (indexed) of the bams. Writes `_gc.tsv` with the GC of each locus and of the normalisation, and warns when they differ by more than `--gc-warn` points. | `None` |
-| `--gc-warn` | GC difference (percentage points) above which a locus is flagged. At 55-60% GC, depth changes by about 0.5% per point in a typical library and up to 5% in biaised one. | `3` |
+| `--gc-warn` | GC difference (percentage points) above which a locus is flagged. At 55-60% GC, depth changes by about 0.5% per point in a typical library and up to 5% in a steep one. | `3` |
 | `--norm-random` | Normalise on N random windows instead of a locus (needs `--fasta`). The windows are written to `_norm_windows.bed`; pass that file to `-n` to reuse them. | `None` |
 | `--norm-size` | Size (bp) of the random windows. | `1000` |
 | `--norm-gc` | `match`: keep windows within 2 GC points of the median GC of the loci; `any`: no GC selection. | `match` |
@@ -289,7 +292,53 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--bkp-passes` | Smoothing passes for rolling-average method. | `1` |
 | **Genotyping** | | |
 | `--mutation` | Tab-delimited file: `chromosome position [mutation_name]`. Returns per-nucleotide read counts at each position. | `None` |
-| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position and the length of the homopolymer run that follows it in each read. | `False` |
+| `--mutation-indels` | With `--mutation`, also count reads with an insertion or a deletion right after each position (vcf-style anchor) and the length of the homopolymer run that follows it in each read. | `False` |
+
+---
+
+## ardu genotype
+
+Reads the codon of known mutations in each read (or read pair), translates it, and with the coverage output of `ardu coverage` shares the copies of the locus between the susceptible (S, reference), resistant (R, named in the mutation) and other (O) amino acids, e.g. `2S2R` for a duplicated heterozygote. The three bases come from the same molecule, which the per-position counts of `ardu coverage --mutation` cannot tell.
+
+```bash
+ardu genotype -b bams.txt -m mutations.tsv -f reference.fa -o run1 \
+    -c ArDuRun-run1-2026-10-29/run1_coverage.tsv
+```
+
+The mutation file has six tab-separated columns: chromosome, start, stop (1-based, inclusive, the three bases of the codon), gene, mutation name and strand of the gene (`forward`/`reverse` or `+`/`-`). The gene must match a locus of the coverage file. Mutation names are of the form `G119S`, or `L1014S/F` for several resistant amino acids; the run stops when the reference codon does not translate to the first amino acid of the name.
+
+```
+AgamP4_2R	3492074	3492076	ace-1	G119S	forward
+```
+
+How the copies are shared:
+- The locus has RCN x 2 copies (RCN x 1 with `--haploid all`). It counts as duplicated above `--dup-rcn` copies per expected copy; below that, it keeps its ploidy, so an RCN of 1.3 gives 2 copies, not 3. Without `-c`, every locus is taken as not duplicated.
+- An amino acid gets copies when it has at least `--min-reads` reads and at least half a copy's share of them, 0.5 / copies (or `--min-frac` if higher). This keeps a single resistant copy in a highly amplified sample (12.5% of the reads at 4 copies) while leaving out sequencing errors.
+- The copies are shared in proportion to the reads by largest remainder, so they always add up to the total.
+
+Where mates overlap, htslib gives each base to one mate only, so a pair is counted once.
+
+### Arguments
+
+| Argument | Description | Default |
+|---|---|---|
+| `-b` / `--bam` | File listing bam paths, one per line. | required |
+| `-m` / `--mutation` | Mutation file (see above). | required |
+| `-f` / `--fasta` | Reference fasta (indexed) of the bams. | required |
+| `-o` / `--outfile` | Prefix of the output file `<prefix>_codons.tsv`. | required |
+| `-c` / `--coverage` | Coverage output of `ardu coverage`, for the RCN of each gene. | `None` |
+| `--translation-table` | NCBI translation table. | `1` |
+| `--min-mapq` | Minimum mapping quality of the reads. | `40` |
+| `--min-baseq` | Minimum base quality of each base of the codon. | `20` |
+| `--min-depth` | Minimum codons read; below it the genotype is NA. | `10` |
+| `--min-reads` | Minimum reads for an amino acid to get a copy. | `3` |
+| `--min-frac` | Minimum share of the reads for an amino acid to get a copy (half a copy applies when higher). | `0.05` |
+| `--dup-rcn` | Copies per expected copy above which a locus counts as duplicated. | `1.4` |
+| `--haploid` | Chromosomes with one copy (e.g. X in males), or `all`. The normalisation locus is taken as diploid unless `all`. | none |
+
+### Output
+
+`<prefix>_codons.tsv` has one row per mutation and one column per sample, like the coverage output. Format: `Genotype;ReadsS;ReadsR;ReadsO;Depth;RCN;Codons;Flags`, e.g. `2S2R;26;26;0;52;2.2;AGC:26:S,GGC:26:G;.` for Yop16-60 at ace-1 G119S. `Codons` lists `codon:reads:amino acid` on the coding strand. Flags: `low_depth`, `rcn_NA`, `R_below_threshold` (resistant reads present but under the threshold), `unplaced_<aa>` (kept, but no copy left for it) and `indel_reads_<n>` (reads with an indel in the codon, left out).
 
 ---
 
@@ -519,9 +568,10 @@ The choice of reference is critical. A wide range of genomic intervals can be us
 
 RCN is the median depth of the locus divided by the median depth of the normalisation locus, so it counts copies per copy of the normalisation locus. With a single copy gene of a diploid genome as reference, RCN = 1 means two copies per cell; multiply by two for copies per diploid cell. Use `--rcn-ci` to judge whether a value differs from 1.
 
-**GC content.** PCR during library preparation makes depth depend on the GC of the fragments, and the shape of that dependence differs between libraries: some lose depth in GC-rich sequence, others gain. When a locus and its reference differ in GC, RCN carries that bias, and it differs between samples. Exons are GC-rich (in AgamP4, median 53% GC against 45% for the genome), so a GC-rich reference gene can be off for typical targets. Give `--fasta` to get the GC of every locus in `_gc.tsv`, with a warning above `--gc-warn` points. 
+**GC content.** PCR during library preparation makes depth depend on the GC of the fragments, and the shape of that dependence differs between libraries: some lose depth in GC-rich sequence, others gain. When a locus and its reference differ in GC, RCN carries that bias, and it differs between samples. Exons are GC-rich (in AgamP4, median 53% GC against 45% for the genome), so a GC-rich reference gene can be off for typical targets. Give `--fasta` to get the GC of every locus in `_gc.tsv`, with a warning above `--gc-warn` points. GC is measured on the regions padded by 100 bp, since the fragments covering a base mostly overlap its close neighbours. Small differences can matter in a strongly biased library: in the most biased of 55 *An. gambiae* libraries, ace-1 and its reference differ by 3.6 points, and the RCN was 50% higher than with random windows matched to ace-1 (2.25 against 1.50).
 
-**Random windows as reference.** `--norm-random 1000` replaces the reference locus by 1,000 windows of 1 kb drawn at random, away from the loci (`--norm-margin`) and from `--norm-exclude`, and matched to the median GC of the loci. A window falling in a duplication or deletion barely moves the median over 1,000 windows. Restrict them with `--norm-chroms` to the autosomes.
+**Random windows as reference.** `--norm-random 1000` replaces the reference locus by 1,000 windows of 1 kb drawn at random, away from the loci (`--norm-margin`) and from `--norm-exclude`, and matched to the median GC of the loci. A window falling in a duplication or deletion barely moves the median over 1,000 windows. Restrict them with `--norm-chroms` to the autosomes: a reference on a sex chromosome halves its depth in the heterogametic sex and doubles every RCN (in *An. gambiae* males, the ace-1 RCN against an X-linked gene came out at 3.5 to 4.8, against 1.4 to 2.3 with autosomal windows). The windows cost about 5 s per bam. To compare runs, reuse the same windows: `-n ArDuRun-run1-<date>/run1_norm_windows.bed`.
+
 Reads in identical paralog copies present in the reference get MAPQ 0 and are dropped by the default `--min-mapq 20`, which flattens the depth of such duplications. Lower `--min-mapq` (e.g. to 0) when the reference contains both copies.
 
 ArDu is specifically designed around a candidate locus approach. While it can handle large numbers of targets, it is not its intended use, so expect long run times and reduced usability at genome wide scale.
@@ -531,4 +581,6 @@ ArDu is specifically designed around a candidate locus approach. While it can ha
 ## Reference
 If you use ArDu, please cite:
 Claret Jean-Loup, Mestre Camille, Milesi Pascal and Labbé Pierrick, *in prep*.
-**DOI:** [10.5281/zenodo.14922763](https://doi.org/10.5281/zenodo.14922763)
+**DOI (all versions, resolves to the latest):** [10.5281/zenodo.14922763](https://doi.org/10.5281/zenodo.14922763)
+
+To cite the exact version you used, take its own DOI from the Zenodo record ("Versions" panel), and give the version number in your methods (`pip show ardu`).

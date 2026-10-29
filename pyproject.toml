@@ -16,6 +16,7 @@ dependencies = [
     "tqdm>=4.66",
     "pyahocorasick>=2.0",
     "scikit-learn>=1.4",
+    "biopython>=1.80",
 ]
 
 [project.optional-dependencies]
