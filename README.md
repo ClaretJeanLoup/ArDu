@@ -314,9 +314,7 @@ AgamP4_2R	3492074	3492076	ace-1	G119S	forward
 How the copies are shared:
 - The locus has RCN x 2 copies (RCN x 1 with `--haploid all`). It counts as duplicated above `--dup-rcn` copies per expected copy; below that, it keeps its ploidy, so an RCN of 1.3 gives 2 copies, not 3. Without `-c`, every locus is taken as not duplicated.
 - An amino acid gets copies when it has at least `--min-reads` reads and at least half a copy's share of them, 0.5 / copies (or `--min-frac` if higher). This keeps a single resistant copy in a highly amplified sample (12.5% of the reads at 4 copies) while leaving out sequencing errors.
-- The copies are shared in proportion to the reads by largest remainder, so they always add up to the total.
-
-Where mates overlap, htslib gives each base to one mate only, so a pair is counted once.
+- The copies are shared in proportion to the sum of reads by largest reminder, so they always add up to the total.
 
 ### Arguments
 
