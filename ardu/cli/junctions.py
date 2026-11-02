@@ -676,7 +676,10 @@ def _draw_alignment_panel(ax, alignment: dict, flank: int = 30, max_reads: int =
         alignment["aligned"], alignment["columns"], alignment["junction_col"]
     )
     covered = [c for c, (_, depth, _) in enumerate(columns) if depth]
-    centre = junction_col if junction_col is not None else covered[len(covered) // 2]
+    # The reads may all lie away from the junction (e.g. adapter dimers), so
+    # centre on them then, and mark the junction only when it is in view.
+    on_reads = junction_col is not None and covered[0] <= junction_col <= covered[-1]
+    centre = junction_col if on_reads else covered[len(covered) // 2]
     lo, hi = max(covered[0], centre - flank), min(covered[-1] + 1, centre + flank)
 
     def first_base(row):
@@ -707,13 +710,14 @@ def _draw_alignment_panel(ax, alignment: dict, flank: int = 30, max_reads: int =
     ax.set_xlabel("Consensus", fontsize=9)
     ax.set_yticks([0] if names and names[0] == EXPECTED else [])
     ax.set_yticklabels(["expected"] if names and names[0] == EXPECTED else [], fontsize=8)
-    if junction_col is not None:
+    if on_reads:
         ax.axvline(junction_col - lo - 0.5, color="black", linewidth=1.5)
     stats = alignment["stats"]
     title = f"{stats['aligned_reads']} reads aligned (MAFFT)"
     if stats["junction_depth"] is not None:
-        title += (f", junction depth {stats['junction_depth']}, "
-                  f"agreement {stats['junction_agreement']:.0%}")
+        title += f", junction depth {stats['junction_depth']}"
+        if stats["junction_agreement"] is not None:
+            title += f", agreement {stats['junction_agreement']:.0%}"
     if len(reads) > max_reads:
         title += f"\nfirst {max_reads} reads shown"
     ax.set_title(title, fontsize=10)
