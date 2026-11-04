@@ -88,14 +88,17 @@ def test_random_windows_give_the_same_rcn(synthetic, tmp_path):
                        norm=RANDOM_ARGS[:2])
     assert out.returncode == 0, out.stderr
     rcn = read_rcn(run_dir)
-    assert abs(float(rcn["dup"][4]) - 2.0) < 0.05
-    assert abs(float(rcn["norm"][4]) - 1.0) < 0.05
+    assert abs(float(rcn["dup"][5]) - 2.0) < 0.05
+    assert abs(float(rcn["norm"][5]) - 1.0) < 0.05
     bed = [l.split("\t") for l in open(os.path.join(run_dir, "test_norm_windows.bed"))]
     assert len(bed) == 12 and all(f[3].strip() == "norm_random" for f in bed)
     # windows keep --norm-margin (500 bp) away from every locus of the region file
     loci = [(1_000, 4_000), (5_200, 6_800), (9_000, 10_000)]
     assert all(int(f[2]) <= s - 500 or int(f[1]) - 1 >= e + 500 for f in bed for s, e in loci)
     assert "norm_random" in open(os.path.join(run_dir, "test_gc.tsv")).read()
+    # the windows are left out of the region coverage, the loci (old norm locus included) are not
+    qc = [l.split("\t")[1] for l in open(os.path.join(run_dir, "test_region_qc.tsv")) if not l.startswith("#")]
+    assert "norm_random" not in qc and {"norm", "dup", "lowmapq"} <= set(qc)
 
 
 def test_norm_ignore_leaves_a_locus_out_of_the_gc_match(synthetic, tmp_path):

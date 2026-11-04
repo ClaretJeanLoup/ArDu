@@ -304,6 +304,8 @@ def calculate_coverage_stats(
     bam_file: str,
     arrays: dict[str, np.ndarray] | None = None,
     exclude_zero: bool = False,
+    min_cov: int = 3,
+    region_stats: list[dict] | None = None,
 ) -> pd.DataFrame:
     """Compute mean, median, and sd of depth of coverage for each named locus.
 
@@ -320,11 +322,18 @@ def calculate_coverage_stats(
     exclude_zero:
         Leave bases with depth 0 out of the mean, median, sd and *arrays*.
         ``coveredbases`` is the number of bases with depth > 0 either way.
+    min_cov:
+        Depth counted in ``pct_mincov``, the percentage of the locus bases
+        at ``min_cov`` or more (zero-depth bases always count).
+    region_stats:
+        Optional list filled with one dict per region of each locus:
+        ``locus``, ``region``, ``length``, ``pct_zero``, ``pct_mincov``.
 
     Returns
     -------
     pd.DataFrame
-        Columns: ``locus``, ``mean``, ``median``, ``sd``, ``coveredbases``.
+        Columns: ``locus``, ``mean``, ``median``, ``sd``, ``coveredbases``,
+        ``pct_mincov``.
         Numeric values where coverage data exists; the string ``"NA"``
         otherwise.
     """
@@ -341,7 +350,16 @@ def calculate_coverage_stats(
                     if not region:
                         continue
                     chrom, start, end = parse_region(region)
-                    per_region.append(depth_array(samfile, chrom, start, end))
+                    depth = depth_array(samfile, chrom, start, end)
+                    per_region.append(depth)
+                    if region_stats is not None:
+                        region_stats.append({
+                            "locus": name,
+                            "region": region,
+                            "length": depth.size,
+                            "pct_zero": 100 * np.count_nonzero(depth == 0) / depth.size if depth.size else "NA",
+                            "pct_mincov": 100 * np.count_nonzero(depth >= min_cov) / depth.size if depth.size else "NA",
+                        })
                 coverage_values = (
                     np.concatenate(per_region) if per_region else np.zeros(0)
                 )
@@ -356,6 +374,8 @@ def calculate_coverage_stats(
                 else:
                     mean_cov = median_cov = sd_cov = "NA"
                 covbases = int(np.count_nonzero(coverage_values)) if coverage_values.size else "NA"
+                pct_mincov = (100 * np.count_nonzero(coverage_values >= min_cov) / coverage_values.size
+                              if coverage_values.size else "NA")
 
                 data_list.append(
                     {
@@ -364,6 +384,7 @@ def calculate_coverage_stats(
                         "median": median_cov,
                         "sd": sd_cov,
                         "coveredbases": covbases,
+                        "pct_mincov": pct_mincov,
                     }
                 )
     except Exception as exc:

@@ -247,6 +247,9 @@ ardu coverage -b bamlist.txt -n reference -r ace1.bed -o AgambR \
 | `--min-mapq` | Minimum mapping quality of reads counted in depth and mutation counts. Lower it for loci with identical paralog copies in the reference, whose reads get MAPQ 0. | `20` |
 | `--min-baseq` | Minimum base quality counted in depth and mutation counts. | `13` |
 | `--exclude-zero-depth` | Leave bases with depth 0 out of the mean, median, sd, RCN and its interval. By default they count as 0, so a locus with more than half of its bases uncovered gets a median, and an RCN, of 0. CovBases is the same in both modes. | `False` |
+| **Coverage QC** | | |
+| `--min-cov` | Depth of the `PctMinCov` field (percentage of the locus bases at this depth or more) and of `_region_qc.tsv`. | `3` |
+| `--warn-zero` | Flag a region of `_region_qc.tsv` with at least this percentage of its bases at depth 0, and warn when a locus of several regions has one: an uncovered exon is hidden in the median of the whole locus. | `50` |
 | **RCN uncertainty** | | |
 | `--rcn-ci` | Add a 95% interval to each RCN from N block bootstrap replicates (two extra fields per cell). | `0` (off) |
 | `--ci-block` | Block size (bp) of the bootstrap; bases are resampled in blocks because neighbouring bases share reads. | `500` |
@@ -511,6 +514,7 @@ This produces a file ready to pass to `-b` in `ardu coverage` or `ardu junctions
 | `--CovBases` | Extract covered bases. | |
 | `--RCN` | Extract relative copy number. | |
 | `--RCNlow`, `--RCNhigh` | Extract the bounds of the RCN interval (coverage run with `--rcn-ci`). | |
+| `--PctMinCov` | Extract the percentage of bases at `--min-cov` or more. Field positions are read from the `# Format:` line of the coverage file. | |
 | **Filtering** | | |
 | `--filter` | Filter columns by value at a locus. Format: `LOCUS:OP:VALUE`, e.g. `ace1:>:1.4`. Loci containing colons are supported (split from the right). | `None` |
 | `--filter-locus` | Locus row to filter on (use with `--filter-op` and `--filter-value`). | `None` |
@@ -530,7 +534,8 @@ All outputs from `ardu coverage` are written to a timestamped directory. A secon
 
 | File | Description |
 |---|---|
-| `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;RCN`, followed by `;RCN_low;RCN_high` with `--rcn-ci`. RCN is written with 4 decimals. |
+| `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;PctMinCov;RCN`, followed by `;RCN_low;RCN_high` with `--rcn-ci`. PctMinCov is the percentage of the locus bases at `--min-cov` or more. The `# Format:` header line names the fields; `ardu parse` and `ardu genotype` find them by name, so files from before PctMinCov still work. RCN is written with 4 decimals. The header gives the date and the run time. |
+| `*_region_qc.tsv` | One row per sample and region of each locus, the normalisation locus included but not the random windows of `--norm-random`: length, percentage of bases at depth 0 and at `--min-cov` or more, and the `uncovered` flag (`--warn-zero`). |
 | `*_gc.tsv` | GC of each locus (regions padded by 100 bp) and its difference with the normalisation, in GC points (if `--fasta` used). |
 | `*_norm_windows.bed` | The random normalisation windows (if `--norm-random` used), in the region file format, for reuse with `-n`. |
 | `*_breakpoints.tsv` | Predicted breakpoint positions (if `--breakpoint` used). Numbered in the same order as the plot. |

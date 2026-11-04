@@ -12,6 +12,7 @@ import time
 import pandas as pd
 import pysam
 
+from ardu.cli.parser import field_positions
 from ardu import bam
 from ardu.codons import (
     CLASSES,
@@ -92,6 +93,7 @@ def register(subparsers) -> None:
 def _read_rcn(path: str) -> dict[str, dict[str, float | None]]:
     """``{locus: {sample: RCN}}`` from an ardu coverage output; ``None`` where RCN is NA."""
     rcn: dict[str, dict[str, float | None]] = {}
+    rcn_index = field_positions(path).get("RCN", 4)
     with open(path) as fh:
         samples = None
         for line in fh:
@@ -105,7 +107,7 @@ def _read_rcn(path: str) -> dict[str, dict[str, float | None]]:
             for sample, cell in zip(samples, parts[1:]):
                 fields = cell.split(";")
                 try:
-                    value = float(fields[4])
+                    value = float(fields[rcn_index])
                 except (IndexError, ValueError):
                     value = math.nan
                 rcn[parts[0]][sample] = None if math.isnan(value) else value

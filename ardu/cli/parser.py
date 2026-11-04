@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import pandas as pd
 
+# positions in files without a '# Format:' line (before PctMinCov was added)
 FIELD_MAP = {
     "uDOC":     0,
     "sdDOC":    1,
@@ -16,6 +17,11 @@ FIELD_MAP = {
     "RCNlow":   5,
     "RCNhigh":  6,
 }
+FIELDS = ["uDOC", "sdDOC", "medDOC", "CovBases", "PctMinCov", "RCN", "RCNlow", "RCNhigh"]
+
+# names of the '# Format:' header line of the coverage file
+_FORMAT_NAMES = {"uDoC": "uDOC", "sdDoC": "sdDOC", "medDoC": "medDOC", "CovBases": "CovBases",
+                 "RCN": "RCN", "RCN_low": "RCNlow", "RCN_high": "RCNhigh", "PctMinCov": "PctMinCov"}
 
 _OPS = {
     ">":  lambda a, b: a > b,
@@ -59,6 +65,7 @@ def register(subparsers) -> None:
     parser.add_argument("--RCN",      action="store_true", help="Extract relative copy number.")
     parser.add_argument("--RCNlow",   action="store_true", help="Extract lower bound of the RCN interval (needs --rcn-ci in coverage).")
     parser.add_argument("--RCNhigh",  action="store_true", help="Extract upper bound of the RCN interval (needs --rcn-ci in coverage).")
+    parser.add_argument("--PctMinCov", action="store_true", help="Extract the percentage of bases at --min-cov depth or more.")
 
     # filtering
     parser.add_argument(
@@ -94,6 +101,18 @@ def _parse_value(cell: str, field_index: int) -> str:
         return str(cell).split(";")[field_index]
     except Exception:
         return "NA"
+
+
+def field_positions(path: str) -> dict:
+    """Field positions from the '# Format:' header line, else the default positions."""
+    with open(path) as fh:
+        for line in fh:
+            if not line.startswith("#"):
+                break
+            if line.startswith("# Format:"):
+                names = line.split(":", 1)[1].strip().split(";")
+                return {_FORMAT_NAMES[n]: i for i, n in enumerate(names) if n in _FORMAT_NAMES}
+    return dict(FIELD_MAP)
 
 
 def _resolve_filter(args):
@@ -165,12 +184,16 @@ def _auto_output(input_path: str, prefix: str | None, fields: list[str],
 # ---------------------------------------------------------------------------
 
 def run(args) -> None:
-    requested_fields = [f for f in FIELD_MAP if getattr(args, f, False)]
+    requested_fields = [f for f in FIELDS if getattr(args, f, False)]
     if not requested_fields:
         raise ValueError(
             "No fields selected. Use at least one of: "
-            "--uDOC --sdDOC --medDOC --CovBases --RCN --RCNlow --RCNhigh"
+            "--uDOC --sdDOC --medDOC --CovBases --RCN --RCNlow --RCNhigh --PctMinCov"
         )
+    positions = field_positions(args.input)
+    missing = [f for f in requested_fields if f not in positions]
+    if missing:
+        raise ValueError(f"Field(s) not in {args.input}: {', '.join(missing)}")
 
     locus, op, value = _resolve_filter(args)
 
@@ -186,7 +209,7 @@ def run(args) -> None:
     output_cols: dict = {"locus": df["locus"]}
     for sample in sample_columns:
         for field in requested_fields:
-            idx = FIELD_MAP[field]
+            idx = positions[field]
             col_name = f"{sample}_{field}" if args.format == "tsv" else sample
             output_cols[col_name] = df[sample].apply(
                 lambda x, i=idx: _parse_value(x, i)

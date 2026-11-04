@@ -112,6 +112,15 @@ def register(subparsers) -> None:
                         help="Leave bases with depth 0 out of the mean, median, sd, RCN and "
                              "its interval (default: they count as 0). CovBases is unchanged.")
 
+    # Coverage QC
+    parser.add_argument("--min-cov", type=int, default=3, metavar="DEPTH",
+                        help="Depth of the PctMinCov field (percentage of the locus bases at this "
+                             "depth or more) and of the _region_qc.tsv file. Default=3.")
+    parser.add_argument("--warn-zero", type=float, default=50, metavar="PCT",
+                        help="Flag a region of _region_qc.tsv with at least this percentage of its "
+                             "bases at depth 0, and warn when a locus of several regions has one. "
+                             "Default=50.")
+
     # RCN uncertainty
     parser.add_argument("--rcn-ci", type=int, default=0, metavar="N",
                         help="Add a 95%% confidence interval to each RCN from N block "
@@ -414,6 +423,8 @@ def _process_one_bam(
         ``{locus: [(bam_name, depth_df, span_str), ...]}``
     probe_profiles_dict : dict
         ``{locus: {bam_name: ratio_array}}``
+    region_stats : list[dict]
+        One dict per sample region (see :func:`calculate_coverage_stats`).
     """
     bam_file, args, regions_dict, plot_intervals_cache, output_dir = args_tuple
     configure_read_filters(args.min_mapq, args.min_baseq)
@@ -421,19 +432,23 @@ def _process_one_bam(
     print(f"Processing {bam_name}")
 
     depth_arrays = {} if args.rcn_ci > 0 else None
+    region_stats: list[dict] = []
     locus_coverage_df = calculate_coverage_stats(regions_dict, bam_file, depth_arrays,
-                                                 exclude_zero=args.exclude_zero_depth)
+                                                 exclude_zero=args.exclude_zero_depth,
+                                                 min_cov=args.min_cov, region_stats=region_stats)
+    for r in region_stats:
+        r["bam_file"] = bam_name
 
     if args.norm not in locus_coverage_df["locus"].values:
         print(f"Normalisation locus not found in {bam_file}. Skipping.")
-        return bam_name, None, [], {}, {}
+        return bam_name, None, [], {}, {}, region_stats
 
     ref_median = locus_coverage_df.loc[
         locus_coverage_df["locus"] == args.norm, "median"
     ].values[0]
     if not isinstance(ref_median, (int, float)):
         print(f"Invalid normalisation coverage in {bam_file}. Skipping.")
-        return bam_name, None, [], {}, {}
+        return bam_name, None, [], {}, {}, region_stats
 
     locus_coverage_df["normalised"] = locus_coverage_df["median"].apply(
         lambda x: x / ref_median if isinstance(x, (int, float)) else "NA"
@@ -450,7 +465,7 @@ def _process_one_bam(
     locus_coverage_df["bam_file"] = bam_name
 
     if not args.plot:
-        return bam_name, locus_coverage_df, [], {}, {}
+        return bam_name, locus_coverage_df, [], {}, {}, region_stats
 
     # Coerce numeric columns; warn about and drop NA rows
     for col in ["mean", "sd", "normalised"]:
@@ -517,7 +532,7 @@ def _process_one_bam(
             breakpoints_list, regions_dict,
         )
 
-    return bam_name, locus_coverage_df, breakpoints_list, pooled_depth_dict, probe_profiles_dict
+    return bam_name, locus_coverage_df, breakpoints_list, pooled_depth_dict, probe_profiles_dict, region_stats
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +549,7 @@ def _run_parallel(
     breakpoints_data: list,
     pooled_depth: dict,
     probe_profiles_all: dict,
+    region_qc: list,
 ) -> None:
     """Distribute per-BAM work across a ``ProcessPoolExecutor``."""
     work_items = [
@@ -549,7 +565,8 @@ def _run_parallel(
         for future in futures:  # as_completed preserves error propagation
             bam_file = futures[future]
             try:
-                bam_name, cov_df, bkps, pd_dict, pp_dict = future.result()
+                bam_name, cov_df, bkps, pd_dict, pp_dict, reg = future.result()
+                region_qc.extend(reg)
                 if cov_df is not None:
                     coverage_dfs.append(cov_df)
                 breakpoints_data.extend(bkps)
@@ -582,10 +599,64 @@ def _format_row(row) -> str:
         covered = "NA"
     # RCN keeps 4 decimals: one decimal hides differences such as 0.04 against 0.08 (e.g. heteroplasmic deletions)
     norm = _f(row["normalised"], 4)
-    cell = f"{mean};{sd};{median};{covered};{norm}"
+    cell = f"{mean};{sd};{median};{covered};{_f(row['pct_mincov'], 1)};{norm}"
     if "rcn_low" in row.index:
         cell += f";{_f(row['rcn_low'], 4)};{_f(row['rcn_high'], 4)}"
     return cell
+
+
+def _write_region_qc(region_qc: list[dict], regions_dict: dict, args, path: str) -> None:
+    """Write the per-region coverage table and warn about loci with mostly uncovered regions."""
+    # random normalisation windows are many and short; a locus given as normalisation stays in
+    df = pd.DataFrame(region_qc)
+    df = df[df["locus"] != NORM_RANDOM].reset_index(drop=True)
+    if df.empty:
+        return
+    df["flag"] = [
+        "uncovered" if isinstance(z, (int, float)) and z >= args.warn_zero else "."
+        for z in df["pct_zero"]
+    ]
+    for col in ("pct_zero", "pct_mincov"):
+        df[col] = [round(v, 1) if isinstance(v, (int, float)) else v for v in df[col]]
+    df = df[["bam_file", "locus", "region", "length", "pct_zero", "pct_mincov", "flag"]]
+    df = df.rename(columns={"pct_mincov": f"pct_ge{args.min_cov}x"})
+    with open(path, "w") as fh:
+        fh.write("# ArDu region coverage\n")
+        fh.write(f"# pct_zero: percentage of the region bases at depth 0; pct_ge{args.min_cov}x: "
+                 f"at depth {args.min_cov} or more.\n")
+        fh.write(f"# flag: uncovered when pct_zero is {args.warn_zero:g} or more.\n")
+        if args.norm == NORM_RANDOM:
+            fh.write("# The random normalisation windows are left out.\n")
+        df.to_csv(fh, sep="\t", index=False)
+    print(f"Region coverage saved to {path}")
+
+    # a mostly uncovered region is diluted in the median of a locus with several regions
+    multi = {locus for locus, regs in regions_dict.items() if len(regs) > 1}
+    flagged = df[df["locus"].isin(multi)].groupby(["bam_file", "locus"], sort=False)
+    lines = []
+    for (bam, locus), sub in flagged:
+        n = int((sub["flag"] == "uncovered").sum())
+        if n:
+            lines.append(f"  {bam} {locus}: {n} of {len(sub)} regions")
+    if lines:
+        print(f"Warning: regions with {args.warn_zero:g}% or more of their bases at depth 0 "
+              f"(see {os.path.basename(path)}):")
+        for line in lines[:20]:
+            print(line)
+        if len(lines) > 20:
+            print(f"  ... and {len(lines) - 20} more sample and locus pairs")
+
+
+def _add_run_time(cov_out: str, elapsed: float) -> None:
+    """Insert the run time after the date line of the coverage header."""
+    with open(cov_out) as fh:
+        lines = fh.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith("# Generated on:"):
+            lines.insert(i + 1, f"# Run time: {elapsed} seconds\n")
+            break
+    with open(cov_out, "w") as fh:
+        fh.writelines(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +785,7 @@ def run(args) -> None:
     breakpoints_data: list[dict] = []
     pooled_depth: dict = {}
     probe_profiles_all: dict = {}
+    region_qc: list[dict] = []
 
     bam_names_without_ext = [
         os.path.basename(b).removesuffix(".bam") for b in bam_files
@@ -725,14 +797,15 @@ def run(args) -> None:
     if getattr(args, "threads", 1) > 1:
         _run_parallel(
             bam_files, args, regions_dict, plot_intervals_cache, output_dir,
-            coverage_dfs, breakpoints_data, pooled_depth, probe_profiles_all,
+            coverage_dfs, breakpoints_data, pooled_depth, probe_profiles_all, region_qc,
         )
     else:
         for bam_file in bam_files:
             try:
-                _, cov_df, bkps, pd_dict, pp_dict = _process_one_bam(
+                _, cov_df, bkps, pd_dict, pp_dict, reg = _process_one_bam(
                     (bam_file, args, regions_dict, plot_intervals_cache, output_dir)
                 )
+                region_qc.extend(reg)
                 if cov_df is not None:
                     coverage_dfs.append(cov_df)
                 breakpoints_data.extend(bkps)
@@ -800,15 +873,17 @@ def run(args) -> None:
             fh.write("# ArDu coverage outfile\n")
             fh.write(f"# Generated on: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}\n")
             if args.rcn_ci > 0:
-                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;RCN;RCN_low;RCN_high\n")
+                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;PctMinCov;RCN;RCN_low;RCN_high\n")
             else:
-                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;RCN\n")
+                fh.write("# Format: uDoC;sdDoC;medDoC;CovBases;PctMinCov;RCN\n")
             fh.write("# uDoC:     mean Depth of Coverage over the entire target span.\n")
             fh.write("# sdDoC:    standard deviation of Depth of Coverage.\n")
             fh.write("# medDoC:   median Depth of Coverage over the entire locus span.\n")
             fh.write("# CovBases: total number of covered bases on locus span.\n")
             fh.write("# RCN:      relative copy number (median depth of the locus / median depth "
                      "of the normalisation locus, i.e. copies per normalisation-locus copy).\n")
+            fh.write(f"# PctMinCov: percentage of the locus bases at depth {args.min_cov} or more "
+                     f"(per region in {out_name}_region_qc.tsv).\n")
             fh.write(f"# Normalisation: {norm_note}\n")
             fh.write("# Zero-depth bases: " + ("left out of uDoC, sdDoC, medDoC and RCN.\n"
                      if args.exclude_zero_depth else "counted as 0 in uDoC, sdDoC, medDoC and RCN.\n"))
@@ -886,5 +961,10 @@ def run(args) -> None:
                 out_file.write("\t".join(row) + "\n")
         print(f"Mutation data saved to {mut_out}")
 
+    if region_qc:
+        _write_region_qc(region_qc, regions_dict, args, os.path.join(output_dir, f"{out_name}_region_qc.tsv"))
+
     elapsed = round(time.time() - start_time, 1)
+    if coverage_dfs:
+        _add_run_time(cov_out, elapsed)
     print(f"Elapsed time: {elapsed} seconds")

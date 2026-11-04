@@ -179,6 +179,18 @@ def test_genotypes_with_coverage(codon_data, tmp_path):
     assert cells["G10S/A"][0] == "1S1R"                                 # RCN 1.2, not duplicated
 
 
+def test_coverage_with_pct_min_cov(codon_data, tmp_path):
+    # the RCN is found by name in the '# Format:' line, after the PctMinCov field
+    cov = tmp_path / "coverage_pct.tsv"
+    cov.write_text(
+        "# ArDu coverage outfile\n# Format: uDoC;sdDoC;medDoC;CovBases;PctMinCov;RCN\nlocus\tsample\n"
+        "geneA\t60;5;60;100;100.0;2.0\ngeneB\t30;5;30;100;100.0;1.2\n"
+    )
+    run_genotype(codon_data, tmp_path, "-c", str(cov))
+    cells = read_cells(tmp_path)
+    assert cells["G119S"][0] == "3S1R" and cells["G10S/A"][0] == "1S1R"
+
+
 def test_haploid_and_low_depth(codon_data, tmp_path):
     run_genotype(codon_data, tmp_path, "--haploid", "all", "--min-depth", "30")
     cells = read_cells(tmp_path)
