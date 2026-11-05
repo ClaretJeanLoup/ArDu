@@ -549,6 +549,35 @@ All outputs from `ardu coverage` are written to a timestamped directory. A secon
 
 ---
 
+## Milesi's lab addendum
+
+ArDu is now installed for the whole lab on Pelle. There is nothing to install, and you don't need `conda activate` or `module load`. Put these two lines in your terminal, or at the top of any script:
+
+```bash
+export PATH=/gorilla/proj/cnvrule/snic2020-6-185/software/envs/ardu_shared/bin:$PATH
+export PYTHONNOUSERSITE=1
+```
+
+Check that it works with `ardu --help`.
+
+Example job (save it as `run_ardu.sh`, then run `sbatch run_ardu.sh`):
+
+```bash
+#!/bin/bash
+#SBATCH -A PROJECTNUMBER
+#SBATCH -J ardu
+#SBATCH -t 04:00:00
+#SBATCH -N 1
+#SBATCH -n 8
+export PATH=/gorilla/proj/cnvrule/snic2020-6-185/software/envs/ardu_shared/bin:$PATH
+export PYTHONNOUSERSITE=1
+ardu coverage -b bamlist.txt -r regions.tsv -n ace-2 -o run1 --fasta reference.fna -t 8
+```
+
+`-t 8` runs 8 bams at once, so keep it the same as `-n 8`. Replace `PROJECTNUMBER` with your own project account. Please don't install your own copy; tell me if something is missing or needs updating.
+
+---
+
 ## Debugging
 
 ```
