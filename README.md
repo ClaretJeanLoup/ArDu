@@ -396,9 +396,9 @@ For each pair, the evidence is gathered in `*_junction_summary.tsv`:
 
 `*_segments.tsv` gives, for each locus with two breakpoints or more, the median depth of each segment between consecutive breakpoints (refined ones when joined, else predicted) and of the flanks outside them (`--segment-flank`, default 10 kb), relative to the mean of the two flanks.
 
-With `--plot-evidence`, a locus with three breakpoints or more also gets an **overview** figure: the reference segments with their depth relative to the flanks, each joined pair as an arc labelled with its SV type and support, and one possible haplotype built from them. Joined deletions and tandem duplications are applied outermost first; an event nested inside a duplicated segment is placed on one of its copies chosen at random (noted on the figure), or, for a deletion whose segment is less covered than the flanks, on both copies. The junction reads alone cannot tell these apart; only the depth can. Junctions that overlap without nesting are shown as arcs but not modelled.
+With `--plot-evidence`, every locus with a joined deletion or tandem duplication also gets an **overview** figure: the joined structures drawn to scale on the genome axis, one row per junction. Each row shows the copies of each segment on a haplotype carrying that junction, inside the joined duplications that contain it: raised over a duplication, dropped over a deletion, with its size. The top row is the observed depth of each segment relative to the flanks, which sums both haplotypes, so a heterozygote for two internal deletions shows both rows and an intermediate depth. Breakpoints are dashed guides. With `--loci` (the BED of `ardu coverage`) the target gene named after the locus is drawn below, and with `--mutation` (chromosome, position, [name]) the marked positions.
 
-`--report` gathers the same evidence in one pdf per sample and locus, one kind of evidence per page for every joined pair: structure (the overview with three breakpoints or more), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
+`--report` gathers the same evidence in one pdf per sample and locus, one kind of evidence per page for every joined pair: structure (the overview figure), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
 
 `--plot-evidence` also draws one figure per sample and joined breakpoint pair: for a deletion or a tandem duplication, a schematic of the reference and the sample (not to scale) with the junction, its sequence and the segment depths; the softclips at both breakpoints (left and right clips stacked, with the predicted and refined positions) and the bridging pair inserts, with the call and its evidence in the title.
 
@@ -460,7 +460,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileups, left and right clips stacked, with predicted and refined breakpoint positions. |
 | `*_{sample}_{locus}_report.pdf` | Evidence report, one page per kind of evidence (if `--report` used). |
-| `*_{sample}_{locus}_overview.png` | For a locus with three breakpoints or more: segments, joined pairs and one possible haplotype (if `--plot-evidence` used). |
+| `*_{sample}_{locus}_overview.png` | For a locus with a joined deletion or tandem duplication: the joined structures to scale, one row per junction, with the observed segment depths (if `--plot-evidence` used). |
 | `*_{sample}_{locus}_1-2_evidence.png` | Softclips at both breakpoints and bridging pair inserts, with the SV call and its evidence (if `--plot-evidence` used). |
 
 ---
