@@ -38,6 +38,7 @@ from ardu.gc import (
 from ardu.intervals import get_regions, get_totalspan, parse_plot_intervals
 from ardu.plotting import make_pooled_plot, render_per_sample_plot
 from ardu.probe import build_probe_profile, write_probe_profiles_tsv
+from ardu.qcplots import plot_gc_rcn, plot_zero_depth
 from ardu.signal import bootstrap_median_ratio, compute_sliding_covariance, window_median, window_variance
 
 
@@ -605,13 +606,16 @@ def _format_row(row) -> str:
     return cell
 
 
-def _write_region_qc(region_qc: list[dict], regions_dict: dict, args, path: str) -> None:
-    """Write the per-region coverage table and warn about loci with mostly uncovered regions."""
+def _write_region_qc(region_qc: list[dict], regions_dict: dict, args, path: str) -> pd.DataFrame | None:
+    """Write the per-region coverage table and warn about loci with mostly uncovered regions.
+
+    Returns the table written, or None when it is empty.
+    """
     # random normalisation windows are many and short; a locus given as normalisation stays in
     df = pd.DataFrame(region_qc)
     df = df[df["locus"] != NORM_RANDOM].reset_index(drop=True)
     if df.empty:
-        return
+        return None
     df["flag"] = [
         "uncovered" if isinstance(z, (int, float)) and z >= args.warn_zero else "."
         for z in df["pct_zero"]
@@ -632,19 +636,43 @@ def _write_region_qc(region_qc: list[dict], regions_dict: dict, args, path: str)
 
     # a mostly uncovered region is diluted in the median of a locus with several regions
     multi = {locus for locus, regs in regions_dict.items() if len(regs) > 1}
-    flagged = df[df["locus"].isin(multi)].groupby(["bam_file", "locus"], sort=False)
+    # one line per locus, so that a normalisation of many windows does not fill the warning
+    sub = df[df["locus"].isin(multi)]
+    n_samples = df["bam_file"].nunique()
     lines = []
-    for (bam, locus), sub in flagged:
-        n = int((sub["flag"] == "uncovered").sum())
-        if n:
-            lines.append(f"  {bam} {locus}: {n} of {len(sub)} regions")
+    for locus, loc_df in sub.groupby("locus", sort=False):
+        per_sample = (loc_df["flag"] == "uncovered").groupby(loc_df["bam_file"], sort=False).sum()
+        hit = per_sample[per_sample > 0]
+        if hit.empty:
+            continue
+        n_regions = len(regions_dict[locus])
+        lo, hi = int(hit.min()), int(hit.max())
+        count = f"{lo}" if lo == hi else f"{lo}-{hi}"
+        names = f" ({', '.join(hit.index)})" if len(hit) <= 3 else ""
+        lines.append(f"  {locus}: {len(hit)} of {n_samples} samples{names}, {count} of {n_regions} regions")
     if lines:
         print(f"Warning: regions with {args.warn_zero:g}% or more of their bases at depth 0 "
               f"(see {os.path.basename(path)}):")
-        for line in lines[:20]:
+        for line in lines:
             print(line)
-        if len(lines) > 20:
-            print(f"  ... and {len(lines) - 20} more sample and locus pairs")
+    return df
+
+
+def _qc_plots(region_df, combined_df, gc_by_locus, args, output_dir: str, out_name: str) -> None:
+    """Zero-depth figure, and GC against RCN spread with --fasta; both need two samples or more."""
+    if combined_df["bam_file"].nunique() < 2:
+        print("One sample only: QC figures skipped.")
+        return
+    if region_df is not None:
+        path = os.path.join(output_dir, f"{out_name}_qc_zero_depth.png")
+        plot_zero_depth(region_df, path)
+        print(f"Zero-depth figure saved to {path}")
+    if gc_by_locus is not None:
+        rcn = combined_df.pivot(index="locus", columns="bam_file", values="normalised")
+        rcn = rcn.drop(index=NORM_RANDOM, errors="ignore")
+        path = os.path.join(output_dir, f"{out_name}_qc_gc.png")
+        if not plot_gc_rcn(rcn, gc_by_locus, args.norm, args.gc_warn, path).empty:
+            print(f"GC figure saved to {path}")
 
 
 def _add_run_time(cov_out: str, elapsed: float) -> None:
@@ -666,10 +694,11 @@ def _add_run_time(cov_out: str, elapsed: float) -> None:
 NORM_RANDOM = "norm_random"
 
 
-def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> str:
+def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> tuple[str, dict | None]:
     """Add the normalisation regions to *regions_dict*, point ``args.norm`` at them, check GC.
 
-    Returns a one-line description of the normalisation for the coverage header.
+    Returns a one-line description of the normalisation for the coverage header, and the
+    GC of each locus (None without ``--fasta``).
     """
     if args.norm_random is not None:
         if not args.fasta:
@@ -733,7 +762,7 @@ def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> st
         gc_by_locus = loci_gc(args.fasta, regions_dict)
         if np.isnan(gc_by_locus[args.norm][0]):
             print("Warning: the normalisation regions are not in the fasta; GC check skipped.")
-            return note
+            return note, None
         gc_out = os.path.join(output_dir, f"{out_name}_gc.tsv")
         flagged = write_gc_report(gc_out, gc_by_locus, args.norm, args.gc_warn)
         print(f"GC report saved to {gc_out}")
@@ -742,7 +771,8 @@ def _set_normalisation(args, regions_dict, output_dir: str, out_name: str) -> st
                   f"{args.gc_warn:g} points (regions +/- {GC_PAD} bp); its RCN may carry a GC bias.")
     else:
         print("No --fasta given: GC of the loci not checked.")
-    return note
+        gc_by_locus = None
+    return note, gc_by_locus
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +805,7 @@ def run(args) -> None:
         bam_files = fh.read().splitlines()
 
     regions_dict = get_regions(args.region)
-    norm_note = _set_normalisation(args, regions_dict, output_dir, out_name)
+    norm_note, gc_by_locus = _set_normalisation(args, regions_dict, output_dir, out_name)
 
     plot_intervals_cache = None
     if getattr(args, "plot_interval", None):
@@ -961,8 +991,12 @@ def run(args) -> None:
                 out_file.write("\t".join(row) + "\n")
         print(f"Mutation data saved to {mut_out}")
 
+    region_df = None
     if region_qc:
-        _write_region_qc(region_qc, regions_dict, args, os.path.join(output_dir, f"{out_name}_region_qc.tsv"))
+        region_df = _write_region_qc(region_qc, regions_dict, args,
+                                     os.path.join(output_dir, f"{out_name}_region_qc.tsv"))
+    if coverage_dfs:
+        _qc_plots(region_df, combined_df, gc_by_locus, args, output_dir, out_name)
 
     elapsed = round(time.time() - start_time, 1)
     if coverage_dfs:

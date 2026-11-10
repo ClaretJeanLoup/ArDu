@@ -535,6 +535,8 @@ All outputs from `ardu coverage` are written to a timestamped directory. A secon
 | File | Description |
 |---|---|
 | `*_coverage.tsv` | Per-locus coverage statistics, one semicolon-packed field per sample. Format: `uDoC;sdDoC;medDoC;CovBases;PctMinCov;RCN`, followed by `;RCN_low;RCN_high` with `--rcn-ci`. PctMinCov is the percentage of the locus bases at `--min-cov` or more. The `# Format:` header line names the fields; `ardu parse` and `ardu genotype` find them by name, so files from before PctMinCov still work. RCN is written with 4 decimals. The header gives the date and the run time. |
+| `*_qc_zero_depth.png` | Per locus, the % of bases at depth 0 in each sample (dot, with the median) and the number of samples with more than 0, 10 and 50% at depth 0. Made with two samples or more; random normalisation windows left out. |
+| `*_qc_gc.png` | Per locus, the GC difference from the normalisation against the spread of RCN across samples (SD of log2 RCN): a locus far in GC tends to have a noisier RCN, as does a real CNV. Made with `--fasta` and two samples or more. |
 | `*_region_qc.tsv` | One row per sample and region of each locus, the normalisation locus included but not the random windows of `--norm-random`: length, percentage of bases at depth 0 and at `--min-cov` or more, and the `uncovered` flag (`--warn-zero`). |
 | `*_gc.tsv` | GC of each locus (regions padded by 100 bp) and its difference with the normalisation, in GC points (if `--fasta` used). |
 | `*_norm_windows.bed` | The random normalisation windows (if `--norm-random` used), in the region file format, for reuse with `-n`. |

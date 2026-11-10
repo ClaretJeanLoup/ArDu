@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 import subprocess
 import sys
 
@@ -123,7 +124,7 @@ def test_pct_min_cov_and_region_qc(synthetic, tmp_path):
     gap = {r[2]: r for r in qc[1:] if r[1] == "gap"}
     assert gap["chr1:19996-20000"][4:] == ["100.0", "0.0", "uncovered"]
     assert gap["chr1:3001-3004"][4:] == ["0.0", "100.0", "."]
-    assert "gap: 1 of 2 regions" in stdout
+    assert "gap: 1 of 1 samples (sample), 1 of 2 regions" in stdout
     assert {r[1] for r in qc[1:]} == {"norm", "gap"}      # the normalisation locus is reported too
 
 
@@ -159,3 +160,33 @@ def test_parse_old_file_without_format_line(tmp_path):
     subprocess.run([sys.executable, "-m", "ardu", "parse", "-i", str(old), "--RCN"],
                    check=True, capture_output=True, text=True)
     assert open(tmp_path / "RCN.tsv").read().splitlines()[1].split("\t")[1] == "3.4"
+
+
+def _two_samples(synthetic, tmp_path):
+    bams = []
+    for name in ("s1", "s2"):
+        for ext in (".bam", ".bam.bai"):
+            shutil.copy(str(synthetic["bam"]) + ext.removeprefix(".bam"), tmp_path / f"{name}{ext}")
+        bams.append(str(tmp_path / f"{name}.bam"))
+    (tmp_path / "two.txt").write_text("\n".join(bams) + "\n")
+    return tmp_path / "two.txt"
+
+
+def test_qc_figures(synthetic, tmp_path):
+    bamlist = _two_samples(synthetic, tmp_path)
+    cmd = [sys.executable, "-m", "ardu", "coverage", "-b", str(bamlist), "-r", str(synthetic["regions"]),
+           "-n", "norm", "-o", "test"]
+    subprocess.run(cmd + ["--fasta", str(synthetic["fasta"])], cwd=tmp_path, check=True, capture_output=True)
+    run_dir = glob.glob(os.path.join(tmp_path, "ArDuRun-test-*"))[0]
+    assert os.path.getsize(os.path.join(run_dir, "test_qc_zero_depth.png")) > 0
+    assert os.path.getsize(os.path.join(run_dir, "test_qc_gc.png")) > 0
+    # without --fasta only the zero-depth figure
+    (tmp_path / "nofasta").mkdir()
+    subprocess.run(cmd, cwd=tmp_path / "nofasta", check=True, capture_output=True)
+    files = os.listdir(glob.glob(os.path.join(tmp_path, "nofasta", "ArDuRun-test-*"))[0])
+    assert "test_qc_zero_depth.png" in files and "test_qc_gc.png" not in files
+
+
+def test_no_qc_figures_with_one_sample(synthetic, tmp_path):
+    run_dir = run_coverage(synthetic, tmp_path)
+    assert not glob.glob(os.path.join(run_dir, "*_qc_*.png"))
