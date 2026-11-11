@@ -394,9 +394,9 @@ For each pair, the evidence is gathered in `*_junction_summary.tsv`:
 - **SV type and size** from the side of the clips: left clips at the left breakpoint and right clips at the right one make a tandem duplication (size from first to last duplicated base), the opposite makes a deletion (size of the deleted segment). `--sv-type` overrides it; without split reads, the bridging pair orientation decides.
 - **junction reads** (with `--junction`), **softclips** per window and **bridging pairs** with their orientation, median and expected insert, the expected insert using the refined size.
 
-`*_segments.tsv` gives, for each locus with two breakpoints or more, the median depth of each segment between consecutive breakpoints (refined ones when joined, else predicted) and of the flanks outside them (`--segment-flank`, default 10 kb), relative to the mean of the two flanks.
+`*_segments.tsv` gives, for each locus with two breakpoints or more, the median depth of each segment between consecutive breakpoints (refined ones when joined, else predicted) and of the flanks outside them (`--segment-flank`, default 10 kb), relative to the mean of the two flanks, and the percentage of its bases at depth 0. The medians are taken over the covered bases only: mapping holes and repeats inside a duplication would otherwise pull it towards 0 (in the Culex strain Ducos, 24% of the duplicated segment is at depth 0, and the median over all bases gave 1.8 instead of 2.6). Wider flanks (e.g. `--segment-flank 150000`) give a steadier scale.
 
-With `--plot-evidence`, every locus with a joined deletion or tandem duplication also gets an **overview** figure: the joined structures drawn to scale on the genome axis, one row per junction. Each row shows the copies of each segment on a haplotype carrying that junction, inside the joined duplications that contain it: raised over a duplication, dropped over a deletion, with its size. The top row is the observed depth of each segment relative to the flanks, which sums both haplotypes, so a heterozygote for two internal deletions shows both rows and an intermediate depth. Breakpoints are dashed guides. With `--loci` (the BED of `ardu coverage`) the target gene named after the locus is drawn below, and with `--mutation` (chromosome, position, [name]) the marked positions.
+With `--plot-evidence`, every locus with a joined deletion or tandem duplication also gets an **overview** figure: the depth of each segment between breakpoints relative to the flanks, drawn to scale on the genome axis, with the breakpoints as dashed guides numbered as in the breakpoint and junction tables. Neighbouring segments within 0.2 of each other are drawn as one level (their values stay in `_segments.tsv`). Segments with 30% or more of their bases at depth 0 are drawn as a grey dotted line, their depth being unreliable, and the title says so when the flanks themselves are. With `--loci` (the BED of `ardu coverage`) the target gene named after the locus is drawn below, and with `--mutation` (chromosome, position, [name]) the marked positions. With `--gff`, every gene of the annotation in the window is drawn too, with its `--gff-feature` (CDS by default) as boxes and a number, named in a legend under the figure (by its name or, with `--gff-label product`, the product of its CDS); genes are stacked on extra rows when they or their labels would overlap, and the gene named after the locus (or under the `--loci` rows) is the target, in red. `--chrom-map` renames the gff chromosomes to those of the bams, as in `ardu regions`. The junctions joining the breakpoints are in `*_junction_summary.tsv` and the evidence figures; the overview does not try to rebuild haplotypes from them.
 
 `--report` gathers the same evidence in one pdf per sample and locus, one kind of evidence per page for every joined pair: structure (the overview figure), softclips at both breakpoints, bridging pair inserts, junction read alignment and junction consensus.
 
@@ -440,6 +440,12 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `--segment-flank` | Length of the flanks outside the first and last breakpoints that segment depths are compared with (bp). | `10000` |
 | `--reference` | Indexed reference fasta for the expected junction and microhomology. Defaults to the `--blast` reference. | `None` |
 | `--report` | Write one pdf per sample and locus with one kind of evidence per page (structure, softclips, insert sizes, junction read alignment, junction consensus). | `False` |
+| `--loci` | BED of the target genes, as in `ardu coverage`; the rows named after the locus are drawn on the overview. | `None` |
+| `--mutation` | Positions to mark on the overview: chromosome, position, [name]. | `None` |
+| `--gff` | gff3 or gtf whose genes in the window are drawn on the overview. | `None` |
+| `--gff-feature` | Feature drawn as boxes on each `--gff` gene (`CDS`, `exon`, or `gene` for the whole span). | `CDS` |
+| `--gff-label` | `name` (falls back to the ID) or `product` (of the CDS). | `name` |
+| `--chrom-map` | Two columns: chromosome name in `--gff`, name in the bams. | `None` |
 | `--plot-mode` | `per-bam`, `pooled`, or `both`. | `per-bam` |
 
 ### Output files
@@ -450,7 +456,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `*_junction_summary.tsv` | One row per sample and breakpoint pair: predicted and refined breakpoints (with clip side and source), SV type and size, split reads, junction reads, softclips per breakpoint, bridging pairs with orientation, median and expected insert; with a reference, the microhomology; with the alignment, reads aligned, consensus length, depth and lowest agreement around the junction, inserted bases and identity with the expected junction. |
 | `*_{sample}_{locus}_1-2_junction_alignment.txt` | Junction and split reads stacked under their consensus, with the junction marked. |
 | `*_{sample}_{locus}_1-2_junction_msa.fasta` | The MAFFT alignment, with the consensus (and the expected junction with a reference). |
-| `*_segments.tsv` | Median depth of each segment between consecutive breakpoints and of the flanks, relative to the flanks. |
+| `*_segments.tsv` | Median depth over the covered bases of each segment between consecutive breakpoints and of the flanks, relative to the flanks, and the % of bases at depth 0. |
 | `*_insert_summary.tsv` | Per bam (and `pooled`): the library insert (median, quartiles and MAD of proper FR pairs), then n, median and quartiles of the bridging pairs per breakpoint pair (with `--pairs`) or of the discordant pairs per breakpoint, by orientation, with the SV type and expected insert. |
 | `*_soft_clipped_sequences.fasta` | All extracted soft-clipped sequences. |
 | `*.tsv` | Per-read softclip details (position, CIGAR, mate position, insert size). |
@@ -460,7 +466,7 @@ ardu junctions -b bamlist.txt -i ArDuRun-run1-DATE/run1_breakpoints.tsv \
 | `*_{sample}_insert_dist.png` | Insert sizes of the bridging (or discordant) pairs, stacked by orientation, with the expected insert. |
 | `*_{sample}_softclip_dist.png` | Softclip pileups, left and right clips stacked, with predicted and refined breakpoint positions. |
 | `*_{sample}_{locus}_report.pdf` | Evidence report, one page per kind of evidence (if `--report` used). |
-| `*_{sample}_{locus}_overview.png` | For a locus with a joined deletion or tandem duplication: the joined structures to scale, one row per junction, with the observed segment depths (if `--plot-evidence` used). |
+| `*_{sample}_{locus}_overview.png` | For a locus with a joined deletion or tandem duplication: depth of each segment relative to the flanks, to scale, with numbered breakpoints, the target gene and marked positions (if `--plot-evidence` used). |
 | `*_{sample}_{locus}_1-2_evidence.png` | Softclips at both breakpoints and bridging pair inserts, with the SV call and its evidence (if `--plot-evidence` used). |
 
 ---

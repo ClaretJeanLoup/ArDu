@@ -412,3 +412,54 @@ def alternative_hits(chain: Chain, hsps: list[Hsp], ratio: float) -> list[tuple[
                 pairs.append((h, g))
                 break
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Genes of a window, for figures
+# ---------------------------------------------------------------------------
+
+LABEL_KEYS = ("Name", "gene", "gene_name", "gene_symbol", "locus_tag", "gene_id", "ID")
+
+
+class GeneTrack:
+    """The genes of an annotation in a window, with the blocks of one feature (CDS by default).
+
+    *chrom_map* renames the annotation chromosomes to those of the bams.
+    """
+
+    def __init__(self, path: str, feature: str = "CDS", label: str = "name",
+                 chrom_map: dict[str, str] | None = None):
+        self.annotation = Annotation(path)
+        self.feature, self.label = feature, label
+        chrom_map = chrom_map or {}
+        self.top = [
+            (chrom_map.get(f.chrom, f.chrom), f) for f in self.annotation.features.values()
+            if not any(p in self.annotation.features for p in f.parents)
+            and f.ftype.lower() not in LEAF_TYPES and f.ftype.lower() not in SEQUENCE_TYPES
+        ]
+
+    def _label(self, feat: Feature) -> str:
+        if self.label == "product":
+            todo = [feat.fid]
+            while todo:
+                f = self.annotation.features[todo.pop()]
+                if f.attrs.get("product"):
+                    return f.attrs["product"][0]
+                todo.extend(self.annotation.children.get(f.fid, []))
+        for key in LABEL_KEYS:
+            if feat.attrs.get(key):
+                return feat.attrs[key][0]
+        return feat.fid.split(":", 1)[-1]
+
+    def genes(self, chrom: str, start: int, end: int, locus: str | None = None) -> list[dict]:
+        """Genes overlapping *chrom*:*start*-*end* (1-based); ``target`` marks those named *locus*."""
+        targets = {f.fid for f in self.annotation.find(locus)} if locus else set()
+        out = []
+        for c, f in self.top:
+            if c != chrom or f.end < start or f.start > end:
+                continue
+            blocks = ([(f.start, f.end)] if self.feature == "gene"
+                      else [(s, e) for _, s, e in self.annotation.intervals(f, self.feature)])
+            out.append({"name": self._label(f), "start": f.start, "end": f.end, "blocks": blocks,
+                        "target": f.fid in targets})
+        return sorted(out, key=lambda g: g["start"])

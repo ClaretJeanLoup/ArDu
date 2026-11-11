@@ -114,7 +114,7 @@ def render_per_sample_plot(
     ax.plot(
         d.pos, d.norm,
         label="Normalised Depth of Coverage",
-        color="lightsteelblue",
+        color="#E08A1E",
         linestyle="none",
         marker=".",
     )
@@ -171,7 +171,7 @@ def render_per_sample_plot(
                     "method": "ruptures",
                 }
             )
-            ax.axvline(bp_pos, color="darkred", linestyle="-", linewidth=1.5)
+            ax.axvline(bp_pos, color="#963223", linestyle="-", linewidth=1.5)
 
             y = base_y
             for prev_pos, prev_y in y_positions:
@@ -181,7 +181,8 @@ def render_per_sample_plot(
 
             ax.text(
                 bp_pos, y, f"{line_num}:{bp_pos}",
-                color="darkred", fontsize=10, weight="bold", va="bottom",
+                color="#963223", fontsize=10, weight="bold", va="bottom", zorder=6,
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.85),
             )
 
     elif getattr(args, "breakpoint", None) == "rollingaverage":
@@ -196,10 +197,10 @@ def render_per_sample_plot(
             region_data = d[(d["pos"] >= region[0]) & (d["pos"] <= region[1])]
             if not region_data.empty:
                 max_norm_depth = region_data.loc[region_data["norm"].idxmax(), "norm"]
-                ax.axvspan(region[0], region[1], color="darkred", alpha=0.3)
+                ax.axvspan(region[0], region[1], color="#963223", alpha=0.3)
                 ax.text(
                     region_center, max_norm_depth + 0.1, str(i + 1),
-                    color="darkred", fontsize=10, weight="bold",
+                    color="#963223", fontsize=10, weight="bold",
                 )
 
     # ------------------------------------------------------------------
@@ -211,7 +212,7 @@ def render_per_sample_plot(
             mask = (d.pos >= totalspan[1]) & (d.pos <= totalspan[2])
             ax.plot(
                 d.pos[mask], d.moving_average[mask],
-                color="mediumpurple", label=locus, zorder=5, linewidth=2.5,
+                color="#8E3FBF", label=locus, zorder=5, linewidth=2.5,
             )
 
     # ------------------------------------------------------------------
@@ -223,7 +224,7 @@ def render_per_sample_plot(
 
     if getattr(args, "breakpoint", None):
         custom_line = Line2D(
-            [0], [0], color="darkred", linestyle="-", linewidth=1.5,
+            [0], [0], color="#963223", linestyle="-", linewidth=1.5,
             label="Predicted Breakpoints",
         )
         handles, labels = ax.get_legend_handles_labels()
@@ -364,7 +365,7 @@ def make_pooled_plot(
         for entry in bkp_list:
             bp_pos = entry["position"]
             line_num = entry["breakpoint_number"]
-            ax.axvline(bp_pos, color="darkred", linestyle="--", linewidth=1.5)
+            ax.axvline(bp_pos, color="#963223", linestyle="--", linewidth=1.5)
 
             y = base_y
             for prev_pos, prev_y in y_positions:
@@ -374,7 +375,8 @@ def make_pooled_plot(
 
             ax.text(
                 bp_pos, y, f"{line_num}:{bp_pos}",
-                color="darkred", fontsize=10, weight="bold", va="bottom",
+                color="#963223", fontsize=10, weight="bold", va="bottom", zorder=6,
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.85),
             )
             if breakpoints_data is not None:
                 breakpoints_data.append(
@@ -393,7 +395,7 @@ def make_pooled_plot(
     # ------------------------------------------------------------------
     if bkp_result:
         custom_line = Line2D(
-            [0], [0], color="darkred", linestyle="--", linewidth=1.5,
+            [0], [0], color="#963223", linestyle="--", linewidth=1.5,
             label="Pooled Breakpoints (multivariate)",
         )
         handles, labels = ax.get_legend_handles_labels()

@@ -17,9 +17,11 @@ from collections import Counter
 
 import matplotlib
 import matplotlib.colors
+import matplotlib.lines
 import matplotlib.patches
 import matplotlib.pyplot as plt
 import matplotlib.ticker
+import matplotlib.transforms
 import numpy as np
 import pandas as pd
 import pysam
@@ -115,6 +117,17 @@ def register(subparsers) -> None:
                         help="BED of the target genes (chrom, start, end, name), as in ardu "
                              "coverage: the rows named after the locus are drawn on the "
                              "structure figure (--plot-evidence and --report).")
+    parser.add_argument("--gff", metavar="GFF",
+                        help="gff3 or gtf (gzipped or not) whose genes are drawn under the "
+                             "structure figure, the one named after the locus as target.")
+    parser.add_argument("--gff-feature", default="CDS", metavar="TYPE",
+                        help="Feature drawn as boxes on each gene of --gff (CDS, exon, or gene "
+                             "for the whole span). Default=CDS.")
+    parser.add_argument("--gff-label", choices=["name", "product"], default="name",
+                        help="Label of the --gff genes: their name (falls back to the ID) or "
+                             "the product of their CDS. Default=name.")
+    parser.add_argument("--chrom-map", metavar="FILE",
+                        help="Two columns: chromosome name in --gff, name in the bams.")
     parser.add_argument("--mutation", metavar="TSV",
                         help="Positions to mark on the structure figure: chromosome, position, "
                              "[name], as in ardu coverage --mutation.")
@@ -884,10 +897,11 @@ def _draw_structure_panel(ax, ev: dict) -> None:
     ax.set_title(title, fontsize=10)
 
 
-_PROFILE_COLOUR = "#2a78d6"
-_OBSERVED_COLOUR = "#898781"
-_GUIDE_COLOUR = "#a3a199"
-_TARGET_COLOUR = "#c4614a"
+_OBSERVED_COLOUR = "#E08A1E"
+_LABEL_COLOUR = "#6b6a66"
+_GENE_COLOUR = "#a3a199"
+_GUIDE_COLOUR = "#963223"
+_TARGET_COLOUR = "#8E3FBF"
 
 
 def _read_target(path: str) -> list[tuple[str, int, int, str]]:
@@ -921,130 +935,178 @@ def _breakpoint_order(segments: list[dict]) -> list[int]:
     ]
 
 
-def _structure_rows(order: list[int], joined: list[dict]) -> list[tuple]:
-    """One row per joined deletion or tandem duplication, widest first:
-    ``(event, containers)`` with *event* ``(ev, segments)`` and *containers*
-    the joined duplications whose segments strictly contain it.
-    """
-    events = []
-    for ev in joined:
-        if ev["sv_type"] in ("deletion", "duplication"):
-            i, j = sorted(order.index(int(b)) for b in ev["pair"].split("-"))
-            events.append((ev, set(range(i + 1, j + 1))))
-    events.sort(key=lambda e: len(e[1]), reverse=True)
-    return [(e, [c for c in events if c[0]["sv_type"] == "duplication" and e[1] < c[1]])
-            for e in events]
-
-
-def _row_levels(n_segments: int, event: tuple, containers: list[tuple]) -> list[int]:
-    """Copies of each segment (flanks included) on a haplotype carrying the
-    event inside its containing duplications: +1 per duplication, -1 per deletion.
-    """
-    levels = [1] * n_segments
-    for ev, segs in containers + [event]:
-        for k in segs:
-            levels[k] += 1 if ev["sv_type"] == "duplication" else -1
-    return levels
-
-
-def _plot_overview(bam_name: str, locus, segments: list[dict], joined: list[dict],
-                   output_path: str, target=None, marks=None) -> None:
-    """The structures of a locus; see :func:`_draw_profile`."""
-    rows = _structure_rows(_breakpoint_order(segments), joined)
-    fig, ax = plt.subplots(figsize=(11, 2.4 + 0.9 * (len(rows) + 1)))
-    _draw_profile(ax, bam_name, locus, segments, joined, target, marks)
+def _plot_overview(bam_name: str, locus, segments: list[dict], output_path: str,
+                   target=None, marks=None, genes=None) -> None:
+    """The depth profile of a locus; see :func:`_draw_profile`."""
+    fig, ax = plt.subplots(figsize=(11, 4.6))
+    _draw_profile(ax, bam_name, locus, segments, target, marks, genes)
     _save(output_path)
 
 
-def _draw_profile(ax, bam_name: str, locus, segments: list[dict], joined: list[dict],
-                  target=None, marks=None) -> None:
-    """The structures of a locus drawn to scale, one row per joined deletion or
-    tandem duplication: the copies of each segment on a haplotype carrying it
-    (inside the joined duplications that contain it), raised over duplications
-    and dropped over deletions. The top row is the observed depth of each
-    segment relative to the flanks, which sums both haplotypes. Breakpoints are
-    dashed guides; the target gene (*target*, BED rows named after the locus)
-    and *marks* (chromosome, position, name) are drawn below.
+def _gene_lanes(genes: list[dict], span: float) -> list[int]:
+    """Lane of each gene so that neither genes nor labels overlap; the target stays in lane 0."""
+    char = span * 0.0082            # width of one label character at fontsize 8 on an 11 inch figure
+    used: list[list[tuple[float, float]]] = []
+    order = sorted(range(len(genes)), key=lambda i: (not genes[i]["target"], genes[i]["start"]))
+    placed = {}
+    for i in order:
+        g = genes[i]
+        mid = (g["start"] + g["end"]) / 2e6
+        half = max((g["end"] - g["start"]) / 2e6, len(g.get("label", g["name"])) * char / 2)
+        lo, hi = mid - half, mid + half
+        lane = next((k for k, spans in enumerate(used)
+                     if all(hi + char < a or lo - char > b for a, b in spans)), len(used))
+        if lane == len(used):
+            used.append([])
+        used[lane].append((lo, hi))
+        placed[i] = lane
+    return [placed[i] for i in range(len(genes))]
+
+
+_MIN_STEP = 0.2     # relative depth differences at or below this are drawn as one level
+_MAX_ZERO = 30      # segments with at least this % of bases at depth 0 are drawn as unreliable
+
+
+def _depth_levels(observed: list, x: list[float], reliable: list[bool] | None = None
+                  ) -> list[tuple[int, int, float | None]]:
+    """Runs of neighbouring segments ``(first, last, level)`` whose depth differs by at most
+    :data:`_MIN_STEP` from the run, at their length-weighted mean depth. Segments of
+    different *reliable* status are never merged."""
+    reliable = reliable or [True] * len(observed)
+    runs: list[list] = []
+    for k, v in enumerate(observed):
+        w = x[k + 1] - x[k]
+        if (v is not None and runs and runs[-1][2] is not None and abs(v - runs[-1][2]) <= _MIN_STEP
+                and reliable[runs[-1][0]] == reliable[k]):
+            run = runs[-1]
+            run[2] = (run[2] * run[3] + v * w) / (run[3] + w)
+            run[1], run[3] = k, run[3] + w
+        else:
+            runs.append([k, k, v, w])
+    return [(a, b, v) for a, b, v, _ in runs]
+
+
+def _draw_profile(ax, bam_name: str, locus, segments: list[dict], target=None, marks=None,
+                  genes=None) -> None:
+    """Depth of each segment between breakpoints relative to the flanks, drawn to
+    scale, with the breakpoints as numbered dashed guides; segments within
+    :data:`_MIN_STEP` of each other are drawn as one level. Below: the genes of
+    *genes* (a :class:`ardu.locate.GeneTrack`), numbered with their names in a
+    legend, the target gene (*target*, BED rows named after the locus, or the
+    --gff gene of that name) under its name, and *marks* (chromosome, position, name).
     """
     order = _breakpoint_order(segments)
-    rows = _structure_rows(order, joined)
     bounds = [segments[0]["start"] - 1] + [r["end"] for r in segments]
     x = [b / 1e6 for b in bounds]
     chrom = segments[0]["chrom"]
-    unit, gap = 0.3, 0.35
-
-    def steps(values, y0):
-        xs, ys = [], []
-        for k, v in enumerate(values):
-            if v is not None:
-                xs += [x[k], x[k + 1]]
-                ys += [y0 + v * unit] * 2
-        return xs, ys
-
-    all_levels = [_row_levels(len(segments), e, c) for e, c in rows]
+    unit = 0.5
     observed = [r["relative_depth"] for r in segments]
-    heights = [max(lv) * unit + gap for lv in all_levels]
-    obs_height = max([v for v in observed if v is not None] + [1]) * unit + gap
-    track = -0.45 if target else -0.15
-    y, tops = 0.0, []
+    top = max([v for v in observed if v is not None] + [1]) * unit + 0.35
 
-    # structure rows, widest at the bottom so the top row is the observed depth
-    for (event, containers), levels, h in reversed(list(zip(rows, all_levels, heights))):
-        ev = event[0]
-        ax.plot(*steps(levels, y), color=_PROFILE_COLOUR, lw=2, solid_joinstyle="miter", zorder=3)
-        i, j = min(event[1]) - 1, max(event[1])
-        size = ev["size"] or (bounds[j + 1] - bounds[i + 1])
-        span = levels[i + 1:j + 1]
-        if ev["sv_type"] == "duplication":
-            text, ty = f"dup {size / 1000:.1f} kb", y + max(span) * unit + 0.03
-        else:
-            text, ty = f"Δ {size / 1000:.1f} kb", y + min(span) * unit + 0.03
-        ax.text((x[i + 1] + x[j + 1]) / 2, ty, text, ha="center", va="bottom", fontsize=8.5)
-        within = f"\nin {', '.join(c[0]['pair'] for c in containers)}" if containers else ""
-        ax.text(x[0], y + unit, f"{ev['pair']} {ev['sv_type']}{within}  ", ha="right",
-                va="center", fontsize=8.5)
-        tops.append((y, levels))
-        y += h
-
-    ax.plot(*steps(observed, y), color=_OBSERVED_COLOUR, lw=1.5, zorder=3)
-    for k, v in enumerate(observed):
-        if v is not None:
-            ax.text((x[k] + x[k + 1]) / 2, y + v * unit + 0.02, f"x{v:.1f}", ha="center",
-                    va="bottom", fontsize=7.5, color=_OBSERVED_COLOUR)
-    ax.text(x[0], y + unit, "depth relative\nto the flanks  ", ha="right", va="center",
-            fontsize=8.5, color=_OBSERVED_COLOUR)
-    top = y + obs_height
-
-    # breakpoint guides up to the observed depth
-    for k in range(1, len(bounds) - 1):
-        vals = [v for v in (observed[k - 1], observed[k]) if v is not None] or [1]
-        ax.plot([x[k]] * 2, [track, y + max(vals) * unit], color=_GUIDE_COLOUR, lw=1.2,
-                ls=(0, (4, 3)), zorder=1)
-
-    # target gene and marked positions
+    track_genes = genes.genes(chrom, bounds[0] + 1, bounds[-1], str(locus)) if genes else []
     exons = [r for r in (target or []) if r[0] == chrom and r[3] == str(locus)]
-    if exons:
-        s, e = min(r[1] for r in exons) / 1e6, max(r[2] for r in exons) / 1e6
-        ax.plot([s, e], [track, track], color=_TARGET_COLOUR, lw=1, zorder=3)
-        for _, rs, re_, _ in exons:
-            ax.add_patch(matplotlib.patches.Rectangle((rs / 1e6, track - 0.08), (re_ - rs) / 1e6,
-                                                      0.16, color=_TARGET_COLOUR, lw=0, zorder=4))
-        ax.text((s + e) / 2, track - 0.12, str(locus), ha="center", va="top", fontsize=9,
-                style="italic")
+    if exons:   # the --loci rows replace the gff gene they fall in, whatever its name
+        track_genes = [g for g in track_genes if not g["target"] and not any(
+            g["start"] <= r[2] and r[1] + 1 <= g["end"] for r in exons)]
+        track_genes.append({"name": str(locus), "start": min(r[1] for r in exons) + 1,
+                            "end": max(r[2] for r in exons),
+                            "blocks": [(r[1] + 1, r[2]) for r in exons], "target": True})
+    numbered = [g for g in track_genes if not g["target"]]
+    for n, g in enumerate(numbered, 1):
+        g["label"] = str(n)
+    lanes = _gene_lanes(track_genes, x[-1] - x[0]) if track_genes else []
+    n_lanes = max(lanes) + 1 if lanes else 0
+    lane_step = 0.45
+    track = -0.45 if track_genes else -0.15
+
+    zero = [r.get("pct_zero") for r in segments]
+    reliable = [not (isinstance(z, (int, float)) and z >= _MAX_ZERO) for z in zero]
+    xs, ys = [], []
+    for a, b, v in _depth_levels(observed, x, reliable):
+        if v is not None:
+            if not reliable[a]:     # mostly uncovered: a thin grey dotted level, outside the line
+                ax.plot([x[a], x[b + 1]], [v * unit] * 2, color=_GENE_COLOUR, lw=1.6, ls=(0, (1, 2)),
+                        zorder=3)
+                xs += [np.nan, np.nan]
+                ys += [np.nan, np.nan]
+                continue
+            xs += [x[a], x[b + 1]]
+            ys += [v * unit] * 2
+            # levels too narrow for a label keep it in _segments.tsv only
+            if x[b + 1] - x[a] < 0.03 * (x[-1] - x[0]):
+                continue
+            ax.text((x[a] + x[b + 1]) / 2, v * unit + 0.05, f"{v:.1f}", ha="center",
+                    va="bottom", fontsize=9, color=_LABEL_COLOUR, zorder=5,
+                    bbox=dict(boxstyle="square,pad=0.05", facecolor="white", edgecolor="none"))
+    ax.plot(xs, ys, color=_OBSERVED_COLOUR, lw=3, zorder=3, solid_joinstyle="miter")
+    ax.text(x[0], unit, "depth relative\nto the flanks  ", ha="right", va="center",
+            fontsize=8.5, color=_LABEL_COLOUR)
+
+    # breakpoint guides, numbered as in the breakpoints and junction tables
+    for k in range(1, len(bounds) - 1):
+        ax.plot([x[k]] * 2, [track - (n_lanes - 1) * lane_step if n_lanes else track, top - 0.12],
+                color=_GUIDE_COLOUR, lw=1.6, ls=(0, (4, 3)), zorder=1)
+        ax.text(x[k], top - 0.1, str(order[k - 1]), ha="center", va="bottom", fontsize=9,
+                color=_GUIDE_COLOUR)
+
+    # genes: the target in tan red, the others in grey, clipped to the window
+    for g, lane in zip(track_genes, lanes):
+        y = track - lane * lane_step
+        colour = _TARGET_COLOUR if g["target"] else _GENE_COLOUR
+        s, e = max(g["start"], bounds[0] + 1) / 1e6, min(g["end"], bounds[-1]) / 1e6
+        ax.plot([s, e], [y, y], color=colour, lw=1.2, zorder=3)
+        for bs, be in g["blocks"]:
+            bs, be = max(bs, bounds[0] + 1), min(be, bounds[-1])
+            if be >= bs:
+                ax.add_patch(matplotlib.patches.Rectangle((bs / 1e6, y - 0.08), (be - bs + 1) / 1e6,
+                                                          0.16, color=colour, lw=0, zorder=4))
+        ax.text((s + e) / 2, y - 0.12, g.get("label", g["name"]), ha="center", va="top",
+                fontsize=9, style="italic" if g["target"] else "normal",
+                color="black" if g["target"] else _LABEL_COLOUR, zorder=5,
+                bbox=dict(boxstyle="square,pad=0.05", facecolor="white", edgecolor="none"))
     for mchrom, pos, name in marks or []:
         if mchrom == chrom and bounds[0] < pos <= bounds[-1]:
             ax.plot(pos / 1e6, track + 0.15, marker="v", ms=6, color=_TARGET_COLOUR, zorder=5)
             if name:
                 ax.text(pos / 1e6, track + 0.22, name, ha="center", va="bottom", fontsize=8)
 
+    bottom = track - (n_lanes - 1) * lane_step - 0.4 if n_lanes else track - 0.1
     ax.set_xlim(x[0], x[-1])
-    ax.set_ylim(track - (0.4 if exons else 0.1), top)
+    ax.set_ylim(bottom, top + 0.1)
+    if n_lanes > 1:
+        w, h = ax.figure.get_size_inches()
+        ax.figure.set_size_inches(w, h + 0.45 * (n_lanes - 1))
     ax.set_yticks([])
     for side in ("left", "top", "right"):
         ax.spines[side].set_visible(False)
-    ax.set_xlabel(f"{chrom} position (Mb)")
-    ax.set_title(f"{bam_name} | {locus}: joined structures to scale (one row per junction, "
-                 "on a haplotype carrying it)", fontsize=10)
+    ax.spines["bottom"].set_linewidth(1.6)
+    ax.tick_params(axis="x", labelsize=11, width=1.6, length=6)
+    ax.set_xlabel(f"{chrom} position (Mb)", fontsize=11)
+    title = f"{bam_name} | {locus}: depth of each segment relative to the flanks"
+    if not (reliable[0] and reliable[-1]):
+        title += f"\nflanks with {_MAX_ZERO}% or more of their bases at depth 0: the scale is not reliable"
+    ax.set_title(title, fontsize=10)
+    # legends under the axis: the breakpoint guides, then the numbered genes, at a fixed
+    # distance in points below the axis whatever the figure height
+    def under_axis(points):
+        return ax.transAxes + matplotlib.transforms.ScaledTranslation(0, -points / 72,
+                                                                      ax.figure.dpi_scale_trans)
+    if len(bounds) > 2:
+        keys = [matplotlib.lines.Line2D([], [], color=_GUIDE_COLOUR, lw=1.6, ls=(0, (4, 3)))]
+        texts = ["breakpoints (refined from the junctions, else predicted by ruptures)"]
+        if not all(reliable):
+            keys.append(matplotlib.lines.Line2D([], [], color=_GENE_COLOUR, lw=1.6, ls=(0, (1, 2))))
+            texts.append(f"{_MAX_ZERO}% or more of the bases at depth 0: depth not reliable")
+        ax.add_artist(ax.legend(keys, texts, ncol=len(keys), loc="upper center",
+                                bbox_to_anchor=(0.5, 0), bbox_transform=under_axis(40),
+                                frameon=False, fontsize=8.5, handlelength=2.5, labelcolor="black"))
+    if numbered:
+        handles = [matplotlib.lines.Line2D([], [], lw=0) for _ in numbered]
+        ax.legend(handles, [f"{g['label']}  {g['name']}" for g in numbered], loc="upper center",
+                  bbox_to_anchor=(0.5, 0), bbox_transform=under_axis(58 if len(bounds) > 2 else 40),
+                  ncol=min(4, len(numbered)),
+                  frameon=False, fontsize=8.5, handlelength=0, handletextpad=0, columnspacing=2.5,
+                  labelcolor="black")
 
 
 _PAGE_WIDTH = 11.7
@@ -1065,7 +1127,8 @@ def _report_empty_page(pdf, title: str, subtitle: str, message: str) -> None:
 
 
 def _write_report(bam_name: str, locus, results: list[tuple], window_plots: dict,
-                  segments: list[dict], output_path: str, target=None, marks=None) -> None:
+                  segments: list[dict], output_path: str, target=None, marks=None,
+                  genes=None) -> None:
     """One PDF per sample and locus with one kind of evidence per page, for
     every joined pair: the structure (:func:`_draw_profile`), the softclips at both breakpoints, the bridging pair inserts, the
     alignment of the junction reads and the junction consensus.
@@ -1085,9 +1148,8 @@ def _write_report(bam_name: str, locus, results: list[tuple], window_plots: dict
         # 1. structure
         joined = [ev for _, _, ev, _, _ in pairs]
         if len(segments) >= 3 and any(ev["sv_type"] in ("deletion", "duplication") for ev in joined):
-            n_rows = len(_structure_rows(_breakpoint_order(segments), joined))
-            fig, ax = plt.subplots(figsize=(_PAGE_WIDTH, 2.4 + 0.9 * (n_rows + 1)))
-            _draw_profile(ax, bam_name, locus, segments, joined, target, marks)
+            fig, ax = plt.subplots(figsize=(_PAGE_WIDTH, 4.6))
+            _draw_profile(ax, bam_name, locus, segments, target, marks, genes)
             _report_page(pdf, fig, f"{header}: structure", calls)
         else:
             _report_empty_page(pdf, f"{header}: structure", calls,
@@ -1337,9 +1399,12 @@ def _junction_alignment(ev: dict, matches: list, k1: tuple, k2: tuple, fasta,
 
 def _segment_depths(bam_file: str, bam_name: str, windows: dict, refined_by_key: dict,
                     flank: int) -> list[dict]:
-    """Median depth of each segment between consecutive breakpoints of a locus,
-    and of the flanks outside them, relative to the mean of the two flanks.
-    Breakpoints refined by a joined pair are used, else the predicted ones.
+    """Median depth over the covered bases of each segment between consecutive
+    breakpoints of a locus, and of the flanks outside them, relative to the mean
+    of the two flanks, with the percentage of bases at depth 0. Zero-depth bases
+    (mapping holes, repeats) are left out of the medians, otherwise they pull a
+    segment with many of them towards 0. Breakpoints refined by a joined pair are
+    used, else the predicted ones.
     """
     rows = []
     with pysam.AlignmentFile(bam_file, "rb") as bam:
@@ -1356,16 +1421,19 @@ def _segment_depths(bam_file: str, bam_name: str, windows: dict, refined_by_key:
                       + [positions[-1][0] + flank])
             labels = (["flank"] + [f"{a}-{b}" for (_, a), (_, b) in zip(positions, positions[1:])]
                       + ["flank"])
-            medians = []
+            medians, zeros = [], []
             for start, end in zip(bounds, bounds[1:]):
                 depth = bam_utils.depth_array(bam, chrom, start, end)
-                medians.append(float(np.median(depth)) if len(depth) else float("nan"))
+                covered = depth[depth > 0]
+                medians.append(float(np.median(covered)) if covered.size else float("nan"))
+                zeros.append(round(100 * float(np.mean(depth == 0)), 1) if len(depth) else float("nan"))
             base = np.nanmean([medians[0], medians[-1]])
-            for label, start, end, median in zip(labels, bounds, bounds[1:], medians):
+            for label, start, end, median, zero in zip(labels, bounds, bounds[1:], medians, zeros):
                 rows.append({
                     "bam": bam_name, "locus": locus, "segment": label, "chrom": chrom,
                     "start": start + 1, "end": end, "median_depth": median,
-                    "relative_depth": round(median / base, 2) if base else None,
+                    "relative_depth": round(median / base, 2) if base and not np.isnan(median) else None,
+                    "pct_zero": zero,
                 })
     return rows
 
@@ -1391,6 +1459,11 @@ def run(args) -> None:
     allowed_pairs = _parse_allowed_pairs(getattr(args, "pairs", None))
     target = _read_target(args.loci) if getattr(args, "loci", None) else None
     marks = _read_marks(args.mutation) if getattr(args, "mutation", None) else None
+    genes = None
+    if getattr(args, "gff", None):
+        from ardu.cli.regions import _read_chrom_map
+        from ardu.locate import GeneTrack
+        genes = GeneTrack(args.gff, args.gff_feature, args.gff_label, _read_chrom_map(args.chrom_map))
     canonical_pairs: list[tuple[int, int]] = []
     if allowed_pairs:
         seen: set = set()
@@ -1609,9 +1682,9 @@ def run(args) -> None:
                 locus_joined = [ev for _, _, _, ev in joined if ev["locus"] == locus]
                 if len(rows) >= 3 and any(ev["sv_type"] in ("deletion", "duplication")
                                           for ev in locus_joined):
-                    _plot_overview(bam_name, locus, rows, locus_joined,
+                    _plot_overview(bam_name, locus, rows,
                                    f"{args.output}_{bam_name}_{locus}_overview.png",
-                                   target, marks)
+                                   target, marks, genes)
             for locus, b1, b2, ev, panel, alignment in pair_results:
                 if not ev["joined"]:
                     continue
@@ -1631,7 +1704,8 @@ def run(args) -> None:
                     ev["_segments"] = segment_text.get(locus)
                 path = f"{args.output}_{bam_name}_{locus}_report.pdf"
                 _write_report(bam_name, locus, results, window_plots,
-                              [r for r in segments if r["locus"] == locus], path, target, marks)
+                              [r for r in segments if r["locus"] == locus], path, target, marks,
+                              genes)
                 if any(ev["joined"] for _, _, ev, _, _ in results):
                     print(f"Saved {path}")
 
@@ -1714,6 +1788,7 @@ def run(args) -> None:
     print(f"Junction evidence saved to {evidence_output}")
     pd.DataFrame(segment_rows, columns=[
         "bam", "locus", "segment", "chrom", "start", "end", "median_depth", "relative_depth",
+        "pct_zero",
     ]).to_csv(segments_output, sep="\t", index=False, na_rep="NA")
     print(f"Segment depths saved to {segments_output}")
     print("Done.")
